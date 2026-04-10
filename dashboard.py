@@ -340,8 +340,9 @@ df_hist = query("""
     SELECT h.customer_id, h.synced_at, h.status_code, h.prev_status,
            h.personalidade_code, h.prev_pessoa,
            h.score, h.prev_score,
-           p.first_name, p.last_name, p.email,
-           p.total_spent, p.last_order_date,
+           p.first_name, p.last_name,
+           p.orders_count, p.avg_ticket, p.total_spent, p.last_order_date,
+           p.categoria_preferida, p.tamanho_preferido,
            c.registration_date,
            f.avg_days_between,
            (SELECT ROUND(o.total::numeric,0)
@@ -393,10 +394,14 @@ else:
     df_hist["De"]              = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"]) + " / " + df_hist["prev_pessoa"].map(PESSOA_LABEL).fillna(df_hist["prev_pessoa"])
     df_hist["Para"]            = df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"]) + " / " + df_hist["personalidade_code"].map(PESSOA_LABEL).fillna(df_hist["personalidade_code"])
     df_hist["Score Δ"]         = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
+    df_hist["Pedidos"]         = df_hist["orders_count"]
+    df_hist["Ticket médio"]    = df_hist["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df_hist["Últ. compra"]     = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df_hist["Penúlt. compra"]  = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df_hist["Cadastro"]        = pd.to_datetime(df_hist["registration_date"]).dt.strftime("%d/%m/%Y")
     df_hist["Frequência"]      = df_hist["avg_days_between"].apply(freq_icon)
+    df_hist["Categoria"]       = df_hist["categoria_preferida"].fillna("—")
+    df_hist["Tamanho"]         = df_hist["tamanho_preferido"].fillna("—")
     df_hist["Data"]            = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
 
     melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
@@ -409,7 +414,7 @@ else:
 
     br()
     st.dataframe(
-        df_hist[["Movimento","Cliente","email","Cadastro","Frequência","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
+        df_hist[["Movimento","Cliente","Cadastro","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
         hide_index=True, use_container_width=True
     )
 
@@ -433,7 +438,7 @@ df_novos = query("""
     SELECT c.woo_id, c.first_name, c.last_name, c.email,
            c.registration_date,
            p.status_label, p.personalidade_label, p.valor_label,
-           p.total_spent, p.orders_count,
+           p.total_spent, p.avg_ticket, p.orders_count, p.last_order_date,
            p.categoria_preferida, p.tamanho_preferido,
            f.avg_days_between
     FROM customers c
@@ -449,19 +454,20 @@ if df_novos.empty:
 else:
     st.metric("Novos Crushes (30 dias)", len(df_novos))
     br()
-    df_novos["Cliente"]     = df_novos["first_name"] + " " + df_novos["last_name"]
-    df_novos["Cadastro"]    = pd.to_datetime(df_novos["registration_date"]).dt.strftime("%d/%m/%Y")
-    df_novos["Pedidos"]     = df_novos["orders_count"]
-    df_novos["Gasto total"] = df_novos["total_spent"].apply(lambda x: f"R$ {x:,.0f}")
-    df_novos["Frequência"]  = df_novos["avg_days_between"].apply(freq_icon)
-    df_novos["Status"]      = df_novos["status_label"]
+    df_novos["Cliente"]       = df_novos["first_name"] + " " + df_novos["last_name"]
+    df_novos["Cadastro"]      = pd.to_datetime(df_novos["registration_date"]).dt.strftime("%d/%m/%Y")
+    df_novos["Últ. pedido"]   = pd.to_datetime(df_novos["last_order_date"]).dt.strftime("%d/%m/%Y")
+    df_novos["Pedidos"]       = df_novos["orders_count"]
+    df_novos["Ticket médio"]  = df_novos["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_novos["Frequência"]    = df_novos["avg_days_between"].apply(freq_icon)
+    df_novos["Status"]        = df_novos["status_label"]
     df_novos["Personalidade"] = df_novos["personalidade_label"]
-    df_novos["Valor"]       = df_novos["valor_label"]
-    df_novos["Categoria"]   = df_novos["categoria_preferida"].fillna("—")
-    df_novos["Tamanho"]     = df_novos["tamanho_preferido"].fillna("—")
+    df_novos["Valor"]         = df_novos["valor_label"]
+    df_novos["Categoria"]     = df_novos["categoria_preferida"].fillna("—")
+    df_novos["Tamanho"]       = df_novos["tamanho_preferido"].fillna("—")
 
     st.dataframe(
-        df_novos[["Cliente","email","Cadastro","Pedidos","Gasto total","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
+        df_novos[["Cliente","Cadastro","Últ. pedido","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
         hide_index=True, use_container_width=True
     )
 
