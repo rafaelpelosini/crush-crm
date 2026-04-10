@@ -139,7 +139,8 @@ if not df_vendas.empty:
     fim_semana_ant = ini_semana - timedelta(days=1)
     ini_mes = hoje.replace(day=1)
     ini_mes_ant = (ini_mes - timedelta(days=1)).replace(day=1)
-    fim_mes_ant = ini_mes - timedelta(days=1)
+    # Compara mesmo nº de dias do mês anterior (ex: abril 1-10 vs março 1-10)
+    fim_mes_ant_equiv = ini_mes_ant + timedelta(days=(hoje - ini_mes).days)
 
     def filtrar(df, d_ini, d_fim):
         mask = (df["date_created"].dt.date >= d_ini) & (df["date_created"].dt.date <= d_fim)
@@ -150,7 +151,7 @@ if not df_vendas.empty:
     v_semana   = filtrar(df_vendas, ini_semana, hoje)
     v_sem_ant  = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
     v_mes      = filtrar(df_vendas, ini_mes, hoje)
-    v_mes_ant  = filtrar(df_vendas, ini_mes_ant, fim_mes_ant)
+    v_mes_ant  = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
 
     def delta_str(atual, anterior):
         if anterior == 0:
@@ -165,7 +166,7 @@ if not df_vendas.empty:
     for col, titulo, atual, anterior, label_ant in [
         (v1, "Hoje",        v_hoje,   v_ontem,   "vs ontem"),
         (v2, "Esta semana", v_semana, v_sem_ant, "vs semana passada"),
-        (v3, "Este mês",    v_mes,    v_mes_ant, "vs mês passado"),
+        (v3, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant, label_mes_ant),
     ]:
         d = delta_str(atual, anterior)
         col.markdown(f"""
@@ -268,6 +269,10 @@ ACOES = [
         "bg": "#f0fff4",
     },
 ]
+
+# label do período de comparação mensal
+dias_no_mes = (hoje - ini_mes).days + 1
+label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
 
 cols = st.columns(len(ACOES))
 for col, a in zip(cols, ACOES):
