@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Funciona local (.env) e no Streamlit Cloud (st.secrets)
 DATABASE_URL = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
 EXP_PATH     = Path(__file__).parent / "exports"
 _engine      = create_engine(DATABASE_URL)
@@ -27,6 +26,55 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── CSS global (tooltips) ─────────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+.tooltip .tip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 700;
+    margin-left: 5px;
+    cursor: help;
+    vertical-align: middle;
+}
+.tooltip .tiptext {
+    visibility: hidden;
+    opacity: 0;
+    width: 230px;
+    background: #1e293b;
+    color: #f1f5f9;
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: left;
+    border-radius: 8px;
+    padding: 10px 12px;
+    position: absolute;
+    z-index: 999;
+    bottom: 130%;
+    left: 50%;
+    transform: translateX(-50%);
+    transition: opacity 0.15s;
+    pointer-events: none;
+}
+.tooltip:hover .tiptext {
+    visibility: visible;
+    opacity: 1;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ── Utilitários ───────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
@@ -35,12 +83,23 @@ def query(sql: str) -> pd.DataFrame:
         return pd.read_sql(text(sql), conn)
 
 
-def card(col, icon, label, value, sub=None, color="#fff"):
+def tip(text: str) -> str:
+    """Retorna HTML de ícone ? com tooltip ao passar o mouse."""
+    safe = text.replace('"', "&quot;")
+    return f'<span class="tooltip"><span class="tip-icon">?</span><span class="tiptext">{safe}</span></span>'
+
+
+def section(title: str, tooltip: str):
+    st.markdown(f"#### {title} {tip(tooltip)}", unsafe_allow_html=True)
+
+
+def card(col, icon, label, value, tooltip="", sub=None, color="#fff"):
+    tip_html = tip(tooltip) if tooltip else ""
     col.markdown(f"""
     <div style="background:{color};border-radius:12px;padding:20px 24px;height:110px">
         <div style="font-size:22px">{icon}</div>
         <div style="font-size:28px;font-weight:700;margin:4px 0">{value}</div>
-        <div style="font-size:13px;color:#888">{label}</div>
+        <div style="font-size:13px;color:#888">{label} {tip_html}</div>
         {"<div style='font-size:12px;color:#aaa;margin-top:2px'>" + sub + "</div>" if sub else ""}
     </div>
     """, unsafe_allow_html=True)
@@ -56,7 +115,6 @@ def now_brt():
 
 
 def brt(iso_str: str) -> str:
-    """Converte string ISO UTC para horário de Brasília formatado."""
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -64,6 +122,16 @@ def brt(iso_str: str) -> str:
         return dt.astimezone(BRASILIA).strftime("%d/%m/%Y %H:%M")
     except Exception:
         return iso_str[:16]
+
+
+def csv_bytes(filtro: str) -> bytes:
+    df = query(f"""
+        SELECT email, first_name, last_name, score,
+               status_label, personalidade_label, valor_label, score_label,
+               orders_count, ROUND(total_spent,2) total_spent, last_order_date
+        FROM crm_profiles WHERE {filtro} ORDER BY score DESC
+    """)
+    return df.to_csv(index=False).encode("utf-8")
 
 
 # ── Dados principais ──────────────────────────────────────────────────────────
@@ -111,18 +179,34 @@ em_risco = df_status[df_status.code == "S4"]["n"].sum() if not df_status.empty e
 vips     = df_valor[df_valor.code == "V1"]["n"].sum() if not df_valor.empty else 0
 perdidos = df_status[df_status.code == "S5"]["n"].sum() if not df_status.empty else 0
 
-card(k1, "👥", "Total de clientes",  f"{total:,.0f}")
-card(k2, "✅", "Ativos",              f"{ativos:,.0f}",   f"{ativos/total*100:.1f}% da base", "#f0fff4")
-card(k3, "🚨", "Em risco",            f"{em_risco:,.0f}", f"{em_risco/total*100:.1f}% da base", "#fff5f5")
-card(k4, "💎", "VIPs",               f"{vips:,.0f}",     "Alto valor + frequência", "#fffbea")
-card(k5, "💰", "Receita total",       f"R$ {receita:,.0f}")
-card(k6, "⭐", "Score médio",         f"{score_med}",     "de 100 pontos")
+card(k1, "👥", "Total de clientes", f"{total:,.0f}",
+     tooltip="Total de cadastros no WooCommerce com pelo menos 1 pedido registrado.")
+
+card(k2, "✅", "Ativos", f"{ativos:,.0f}",
+     tooltip="Compraram nos últimos 90 dias E têm 4+ pedidos. São os fãs de verdade da marca.",
+     sub=f"{ativos/total*100:.1f}% da base", color="#f0fff4")
+
+card(k3, "🚨", "Em risco", f"{em_risco:,.0f}",
+     tooltip="Não compram há 181–360 dias. Têm histórico relevante mas estão sumindo.",
+     sub=f"{em_risco/total*100:.1f}% da base", color="#fff5f5")
+
+card(k4, "💎", "VIPs", f"{vips:,.0f}",
+     tooltip="Gastaram mais de R$ 5.000 no total. Grupo de elite da marca — tratar com prioridade máxima.",
+     sub="Alto valor + frequência", color="#fffbea")
+
+card(k5, "💰", "Receita total", f"R$ {receita:,.0f}",
+     tooltip="Soma de todos os pedidos com status diferente de cancelado/reembolsado, desde o início.")
+
+card(k6, "⭐", "Score médio", f"{score_med}",
+     tooltip="Pontuação de 0 a 100 que combina recência, frequência, tempo de cadastro e valor gasto. Quanto maior, melhor.",
+     sub="de 100 pontos")
 
 br()
 
 # ── Vendas: dia / semana / mês ────────────────────────────────────────────────
 
-st.markdown("#### Vendas por período")
+section("Vendas por período",
+        "Receita de pedidos pagos (exclui cancelados e reembolsados). Comparação sempre com o mesmo número de dias do período anterior.")
 
 df_vendas = query("""
     SELECT date_created, total
@@ -139,19 +223,18 @@ if not df_vendas.empty:
     fim_semana_ant = ini_semana - timedelta(days=1)
     ini_mes = hoje.replace(day=1)
     ini_mes_ant = (ini_mes - timedelta(days=1)).replace(day=1)
-    # Compara mesmo nº de dias do mês anterior (ex: abril 1-10 vs março 1-10)
     fim_mes_ant_equiv = ini_mes_ant + timedelta(days=(hoje - ini_mes).days)
 
     def filtrar(df, d_ini, d_fim):
         mask = (df["date_created"].dt.date >= d_ini) & (df["date_created"].dt.date <= d_fim)
         return df[mask]["total"].sum()
 
-    v_hoje     = filtrar(df_vendas, hoje, hoje)
-    v_ontem    = filtrar(df_vendas, ontem, ontem)
-    v_semana   = filtrar(df_vendas, ini_semana, hoje)
-    v_sem_ant  = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
-    v_mes      = filtrar(df_vendas, ini_mes, hoje)
-    v_mes_ant  = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
+    v_hoje    = filtrar(df_vendas, hoje, hoje)
+    v_ontem   = filtrar(df_vendas, ontem, ontem)
+    v_semana  = filtrar(df_vendas, ini_semana, hoje)
+    v_sem_ant = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
+    v_mes     = filtrar(df_vendas, ini_mes, hoje)
+    v_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
     label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
 
     def delta_str(atual, anterior):
@@ -180,7 +263,6 @@ if not df_vendas.empty:
 
     br()
 
-    # Gráfico de vendas diárias — últimos 30 dias
     df_30 = df_vendas[df_vendas["date_created"].dt.date >= (hoje - timedelta(days=29))].copy()
     df_30["dia"] = df_30["date_created"].dt.date
     df_diario = df_30.groupby("dia")["total"].sum().reset_index()
@@ -196,7 +278,8 @@ st.divider()
 
 # ── Ações sugeridas ───────────────────────────────────────────────────────────
 
-st.markdown("#### Ações recomendadas")
+section("Ações recomendadas",
+        "Segmentos prioritários identificados automaticamente pelo CRM. Cada card mostra quantos clientes estão nesse grupo e sugere o canal de ação. Baixe a lista direto para subir no Meta Ads ou disparar email.")
 
 em_risco_alto = query("""
     SELECT COUNT(*) n FROM crm_profiles
@@ -208,12 +291,12 @@ perdidos_alto = query("""
     WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
 """).iloc[0]["n"]
 
-segundo_pedido = query("""
+segundo_pedido_n = query("""
     SELECT COUNT(*) n FROM crm_profiles
     WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
 """).iloc[0]["n"]
 
-crush_promissor = query("""
+crush_promissor_n = query("""
     SELECT COUNT(*) n FROM crm_profiles
     WHERE personalidade_code = 'P3' AND recencia_code IN ('R1','R2')
 """).iloc[0]["n"]
@@ -223,67 +306,92 @@ receita_em_risco = query("""
     WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
 """).iloc[0]["v"] or 0
 
+hoje_str = now_brt().strftime("%Y-%m-%d")
+
 ACOES = [
     {
         "prioridade": "🔴 Alta",
-        "acao": "Campanha de reativação urgente",
+        "acao": "Reativação urgente",
         "segmento": "Em risco (alto valor)",
         "clientes": em_risco_alto,
         "detalhe": f"R$ {receita_em_risco:,.0f} em receita histórica em jogo",
         "canal": "Email + WhatsApp",
         "bg": "#fff5f5",
+        "tooltip": "Clientes que gastaram R$ 500+ mas não compram há 181–360 dias. Risco real de perda permanente.",
+        "filtro": "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
+        "arquivo": f"{hoje_str}_em_risco_alto_valor.csv",
     },
     {
         "prioridade": "🔴 Alta",
-        "acao": "Win-back de perdidos VIP",
+        "acao": "Win-back VIP",
         "segmento": "Perdidos alto valor",
         "clientes": perdidos_alto,
-        "detalhe": "Oferta exclusiva de retorno — última tentativa",
+        "detalhe": "Oferta exclusiva — última tentativa de retorno",
         "canal": "Email personalizado",
         "bg": "#fff5f5",
+        "tooltip": "Clientes que gastaram R$ 5.000+ e sumiram há mais de 1 ano. Campanha de recuperação com oferta exclusiva.",
+        "filtro": "status_code = 'S5' AND valor_code IN ('V1','V2')",
+        "arquivo": f"{hoje_str}_perdidos_alto_valor.csv",
     },
     {
         "prioridade": "🟡 Média",
         "acao": "Induzir 2ª compra",
         "segmento": "Compraram 1x recentemente",
-        "clientes": segundo_pedido,
-        "detalhe": "Converter compradores únicos em recorrentes",
+        "clientes": segundo_pedido_n,
+        "detalhe": "2ª compra é o maior preditor de fidelização",
         "canal": "Email + Meta Ads retargeting",
         "bg": "#fffbea",
+        "tooltip": "Fizeram apenas 1 pedido nos últimos 90 dias. O segundo pedido transforma um comprador casual em cliente fiel.",
+        "filtro": "frequencia_code = 'F1' AND recencia_code = 'R1'",
+        "arquivo": f"{hoje_str}_segundo_pedido.csv",
     },
     {
         "prioridade": "🟡 Média",
-        "acao": "Converter crush promissor",
+        "acao": "Converter crush",
         "segmento": "Crush promissor recente",
-        "clientes": crush_promissor,
-        "detalhe": "Clientes com potencial — empurrar para recorrência",
+        "clientes": crush_promissor_n,
+        "detalhe": "Gastaram bem numa única compra recente",
         "canal": "Email sequência + remarketing",
         "bg": "#fffbea",
+        "tooltip": "Gastaram R$ 250+ em uma compra recente mas ainda têm baixa frequência. Alto potencial de virar recorrente.",
+        "filtro": "personalidade_code = 'P3' AND recencia_code IN ('R1','R2')",
+        "arquivo": f"{hoje_str}_crush_promissor.csv",
     },
     {
         "prioridade": "🟢 Contínua",
-        "acao": "Lookalike no Meta Ads",
+        "acao": "Lookalike Meta Ads",
         "segmento": "VIPs + Lovers ativos",
         "clientes": int(vips),
-        "detalhe": "Usar como seed para encontrar novos clientes parecidos",
+        "detalhe": "Seed para encontrar novos clientes parecidos",
         "canal": "Meta Ads",
         "bg": "#f0fff4",
+        "tooltip": "Os melhores clientes ativos da base. Usados como modelo para o Meta Ads encontrar pessoas com perfil similar.",
+        "filtro": "personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",
+        "arquivo": f"{hoje_str}_lookalike_seed.csv",
     },
 ]
-
 
 cols = st.columns(len(ACOES))
 for col, a in zip(cols, ACOES):
     col.markdown(f"""
-    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:190px;border:1px solid #e2e8f0">
+    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:175px;border:1px solid #e2e8f0">
         <div style="font-size:11px;color:#888;margin-bottom:6px">{a['prioridade']}</div>
-        <div style="font-size:14px;font-weight:700;margin-bottom:4px">{a['acao']}</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:2px">{a['acao']} {tip(a['tooltip'])}</div>
         <div style="font-size:12px;color:#555;margin-bottom:6px">{a['segmento']}</div>
         <div style="font-size:20px;font-weight:700;color:#7c3aed">{a['clientes']:,.0f} <span style="font-size:11px;font-weight:400;color:#888">clientes</span></div>
         <div style="font-size:11px;color:#aaa;margin-top:4px">{a['detalhe']}</div>
         <div style="font-size:11px;color:#7c3aed;margin-top:4px">📣 {a['canal']}</div>
     </div>
     """, unsafe_allow_html=True)
+    br()
+    col.download_button(
+        label="⬇️ Baixar lista",
+        data=csv_bytes(a["filtro"]),
+        file_name=a["arquivo"],
+        mime="text/csv",
+        use_container_width=True,
+        key=f"dl_{a['arquivo']}",
+    )
 
 br()
 st.divider()
@@ -293,7 +401,8 @@ st.divider()
 c1, c2 = st.columns(2)
 
 with c1:
-    st.markdown("#### Status da Relação")
+    section("Status da Relação",
+            "Onde cada cliente está na relação com a marca:\n✅ Ativo: comprou nos últimos 90 dias com 4+ pedidos\n⚠️ Oscilando: recente mas pouco frequente\n🧊 Esfriando: 91–180 dias sem comprar\n🚨 Em risco: 181–360 dias\n👻 Perdido: mais de 1 ano")
     cores_s = {"S1":"#22c55e","S2":"#f59e0b","S3":"#3b82f6","S4":"#ef4444","S5":"#94a3b8"}
     fig = px.bar(
         df_status, x="n", y="label", orientation="h",
@@ -306,7 +415,8 @@ with c1:
     st.plotly_chart(fig, use_container_width=True)
 
 with c2:
-    st.markdown("#### Personalidade")
+    section("Personalidade",
+            "Perfil comportamental baseado em frequência e valor gasto:\n💎 Sugar Lover: frequente e gasta muito (R$2.500+)\n🔥 Lover: frequente mas ticket menor\n💘 Crush Promissor: gasta bem mas ainda pouco frequente\n🙂 Date Casual: compras esparsas e valor baixo\n👻 Ghost: nunca comprou")
     cores_p = {"P1":"#7c3aed","P2":"#ef4444","P3":"#f59e0b","P4":"#3b82f6","P5":"#94a3b8"}
     fig2 = px.bar(
         df_pessoa, x="n", y="label", orientation="h",
@@ -320,7 +430,9 @@ with c2:
 
 # ── Valor da Relação ──────────────────────────────────────────────────────────
 
-st.markdown("#### Valor da Relação")
+section("Valor da Relação",
+        "Segmentação por valor total gasto na marca:\n💎 VIP: R$ 5.000+\n🔥 Alto valor: R$ 2.500–5.000\n🍷 Médio valor: R$ 1.000–2.500\n🙂 Baixo valor: até R$ 500\n👀 Observador: nunca comprou")
+
 c1, c2 = st.columns([1, 2])
 
 with c1:
@@ -346,7 +458,7 @@ st.divider()
 
 # ── Segmentos prioritários ────────────────────────────────────────────────────
 
-st.markdown("#### Segmentos de ação")
+section("Segmentos de ação", "Listas detalhadas de clientes por segmento. Use para revisar manualmente ou exportar para campanhas.")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💎 VIPs",
@@ -357,6 +469,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 with tab1:
+    st.caption("Clientes que gastaram R$ 5.000+ no total. Tratamento VIP — não perder por nada.")
     df = query("""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
@@ -378,7 +491,7 @@ with tab2:
         WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
         ORDER BY total_spent DESC
     """)
-    st.caption(f"{len(df)} clientes com histórico relevante prestes a serem perdidos")
+    st.caption(f"{len(df)} clientes com histórico relevante (R$500+) que não compram há 181–360 dias.")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab3:
@@ -390,7 +503,7 @@ with tab3:
         WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
         ORDER BY total_spent DESC
     """)
-    st.caption(f"{len(df)} clientes que compraram 1x recentemente — induzir 2ª compra")
+    st.caption(f"{len(df)} clientes que fizeram 1 pedido nos últimos 90 dias — a 2ª compra é o maior preditor de fidelização.")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab4:
@@ -402,7 +515,7 @@ with tab4:
         WHERE status_code = 'S3'
         ORDER BY total_spent DESC
     """)
-    st.caption(f"{len(df)} clientes que já foram ativos e estão reduzindo compras")
+    st.caption(f"{len(df)} clientes que já compraram bem mas estão reduzindo frequência (91–180 dias sem comprar).")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab5:
@@ -414,29 +527,30 @@ with tab5:
         WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
         ORDER BY total_spent DESC
     """)
-    st.caption(f"{len(df)} clientes de alto valor que sumiram — campanha win-back")
+    st.caption(f"{len(df)} clientes de alto valor (R$2.500+) que sumiram há mais de 1 ano — campanha win-back.")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 st.divider()
 
-# ── Audiências exportadas ─────────────────────────────────────────────────────
+# ── Audiências para a agência ─────────────────────────────────────────────────
 
-st.markdown("#### Audiências para a agência")
+section("Audiências para a agência",
+        "Listas prontas para subir no Meta Ads (Custom Audience), Google Ads ou disparar via email. Geradas em tempo real direto do banco.")
 
 SEGMENTS_DASH = {
-    "VIPs":                  ("status_code IN ('S1','S2') AND valor_code IN ('V1','V2')",             "Retenção premium"),
-    "Ativos":                ("status_code = 'S1'",                                                   "Manter engajados"),
-    "Sugar Lovers":          ("personalidade_code = 'P1'",                                            "Alto valor e frequência"),
-    "Lovers":                ("personalidade_code IN ('P1','P2')",                                    "Clientes frequentes"),
-    "Esfriando":             ("status_code = 'S3'",                                                   "Reativação suave"),
-    "Em Risco":              ("status_code = 'S4'",                                                   "Última chance"),
-    "Em Risco (Alto Valor)": ("status_code = 'S4' AND valor_code IN ('V1','V2','V3')",               "Prioridade máxima"),
-    "Perdidos (Alto Valor)": ("status_code = 'S5' AND valor_code IN ('V1','V2')",                    "Win-back"),
-    "Crush Promissor":       ("personalidade_code = 'P3' AND recencia_code IN ('R1','R2')",           "Converter para recorrência"),
-    "Segundo Pedido":        ("frequencia_code = 'F1' AND recencia_code = 'R1'",                     "Induzir 2ª compra"),
-    "Lookalike Seed":        ("personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",     "Seed Meta Ads"),
-    "Supressão":             ("status_code = 'S5' AND valor_code IN ('V4','V5')",                    "Não gastar verba"),
-    "Retargeting":           ("status_code IN ('S1','S2') AND recencia_code IN ('R1','R2')",          "Lançamentos e novidades"),
+    "VIPs":                  ("status_code IN ('S1','S2') AND valor_code IN ('V1','V2')",           "Retenção premium — melhores clientes ativos"),
+    "Ativos":                ("status_code = 'S1'",                                                 "Clientes mais engajados da base"),
+    "Sugar Lovers":          ("personalidade_code = 'P1'",                                          "Frequentes e de alto valor — fãs da marca"),
+    "Lovers":                ("personalidade_code IN ('P1','P2')",                                  "Clientes frequentes — âncora da receita"),
+    "Esfriando":             ("status_code = 'S3'",                                                 "Reativação suave — ainda têm potencial"),
+    "Em Risco":              ("status_code = 'S4'",                                                 "Última chance antes de perder definitivamente"),
+    "Em Risco (Alto Valor)": ("status_code = 'S4' AND valor_code IN ('V1','V2','V3')",             "Prioridade máxima de reativação"),
+    "Perdidos (Alto Valor)": ("status_code = 'S5' AND valor_code IN ('V1','V2')",                  "Win-back — oferta exclusiva de retorno"),
+    "Crush Promissor":       ("personalidade_code = 'P3' AND recencia_code IN ('R1','R2')",         "Converter para recorrência"),
+    "Segundo Pedido":        ("frequencia_code = 'F1' AND recencia_code = 'R1'",                   "Induzir 2ª compra"),
+    "Lookalike Seed":        ("personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",   "Seed para Lookalike no Meta Ads"),
+    "Supressão":             ("status_code = 'S5' AND valor_code IN ('V4','V5')",                  "Excluir das campanhas — não vale o investimento"),
+    "Retargeting":           ("status_code IN ('S1','S2') AND recencia_code IN ('R1','R2')",        "Retargeting quente — lançamentos e novidades"),
 }
 
 seg_info = []
@@ -452,19 +566,10 @@ escolha = st.selectbox("", list(SEGMENTS_DASH.keys()), label_visibility="collaps
 
 if escolha:
     filtro = SEGMENTS_DASH[escolha][0]
-    df_dl = query(f"""
-        SELECT email, first_name, last_name, score,
-               status_label, personalidade_label, valor_label, score_label,
-               orders_count, ROUND(total_spent,2) total_spent, last_order_date
-        FROM crm_profiles
-        WHERE {filtro}
-        ORDER BY score DESC
-    """)
-    hoje_str = now_brt().strftime("%Y-%m-%d")
-    nome_arquivo = f"{hoje_str}_{escolha.lower().replace(' ', '_')}.csv"
+    nome_arquivo = f"{hoje_str}_{escolha.lower().replace(' ', '_').replace('(','').replace(')','')}.csv"
     st.download_button(
         "⬇️ Baixar CSV",
-        df_dl.to_csv(index=False).encode("utf-8"),
+        csv_bytes(filtro),
         file_name=nome_arquivo,
         mime="text/csv",
     )
