@@ -82,7 +82,18 @@ def run_sync(full: bool = False):
             if r["woo_id"] not in customer_map:
                 customer_map[r["woo_id"]] = r
 
-    # ── 2. Pedidos ────────────────────────────────────────────────────────
+    # ── 2. Produtos → mapa de categorias ─────────────────────────────────
+    print("▶ Buscando produtos e categorias...")
+    SKIP_CATS = {"sale", "collabs", "black friday 2014", "black friday 2023", "melissa", "qatar 2022"}
+    raw_products = client.get_products()
+    product_categories = {}
+    for p in raw_products:
+        cats = [c["name"] for c in p.get("categories", []) if c["name"].lower() not in SKIP_CATS]
+        if cats:
+            product_categories[p["id"]] = cats[0]
+    print(f"  {len(product_categories)} produtos mapeados\n")
+
+    # ── 3. Pedidos ────────────────────────────────────────────────────────
     print("▶ Buscando pedidos...")
     raw_orders = client.get_orders(modified_after=last_sync)
     print(f"  {len(raw_orders)} pedidos recebidos\n")
@@ -99,12 +110,14 @@ def run_sync(full: bool = False):
             "status":         o.get("status", ""),
         })
         for item in o.get("line_items", []):
+            pid = item.get("product_id", 0)
             item_rows.append({
                 "order_id":     o["id"],
-                "product_id":   item.get("product_id", 0),
+                "product_id":   pid,
                 "product_name": item.get("name", ""),
                 "quantity":     int(item.get("quantity", 1)),
                 "total":        float(item.get("total", 0)),
+                "category":     product_categories.get(pid, ""),
             })
 
     with db.connect() as conn:
@@ -112,10 +125,11 @@ def run_sync(full: bool = False):
         db.upsert_order_items_batch(conn, item_rows)
     print(f"  {len(item_rows)} itens de pedido salvos\n")
 
-    # ── 3. Agrega e classifica ────────────────────────────────────────────
+    # ── 4. Agrega, classifica e computa preferências ──────────────────────
     print("▶ Calculando métricas e classificando clientes...")
     with db.connect() as conn:
-        stats = db.fetch_order_stats(conn)
+        stats       = db.fetch_order_stats(conn)
+        preferences = db.fetch_customer_preferences(conn)
 
     profile_rows = []
     for woo_id, cdata in customer_map.items():
@@ -134,17 +148,20 @@ def run_sync(full: bool = False):
             registration_date, last_order_date
         )
 
+        prefs = preferences.get(woo_id, {})
         profile_rows.append({
-            "customer_id":       woo_id,
-            "email":             cdata.get("email", ""),
-            "first_name":        cdata.get("first_name", ""),
-            "last_name":         cdata.get("last_name", ""),
-            "orders_count":      orders_count,
-            "total_spent":       total_spent,
-            "avg_ticket":        avg_ticket,
-            "last_order_date":   last_order_date,
-            "registration_date": registration_date,
-            "classified_at":     now,
+            "customer_id":        woo_id,
+            "email":              cdata.get("email", ""),
+            "first_name":         cdata.get("first_name", ""),
+            "last_name":          cdata.get("last_name", ""),
+            "orders_count":       orders_count,
+            "total_spent":        total_spent,
+            "avg_ticket":         avg_ticket,
+            "last_order_date":    last_order_date,
+            "registration_date":  registration_date,
+            "classified_at":      now,
+            "categoria_preferida": prefs.get("categoria_preferida"),
+            "tamanho_preferido":   prefs.get("tamanho_preferido"),
             **crm,
         })
 

@@ -126,6 +126,12 @@ def init():
             CREATE INDEX IF NOT EXISTS idx_hist_cust   ON profile_history(customer_id);
             CREATE INDEX IF NOT EXISTS idx_hist_sync   ON profile_history(synced_at);
         """)
+        # Migrações incrementais — colunas adicionadas após criação inicial
+        cur.execute("""
+            ALTER TABLE order_items    ADD COLUMN IF NOT EXISTS category TEXT;
+            ALTER TABLE crm_profiles   ADD COLUMN IF NOT EXISTS categoria_preferida TEXT;
+            ALTER TABLE crm_profiles   ADD COLUMN IF NOT EXISTS tamanho_preferido TEXT;
+        """)
 
 
 def upsert_customers_batch(conn, rows: list[dict]):
@@ -161,10 +167,11 @@ def upsert_order_items_batch(conn, rows: list[dict]):
         return
     cur = conn.cursor()
     psycopg2.extras.execute_batch(cur, """
-        INSERT INTO order_items (order_id, product_id, product_name, quantity, total)
-        VALUES (%(order_id)s, %(product_id)s, %(product_name)s, %(quantity)s, %(total)s)
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, total, category)
+        VALUES (%(order_id)s, %(product_id)s, %(product_name)s, %(quantity)s, %(total)s, %(category)s)
         ON CONFLICT (order_id, product_id) DO UPDATE SET
-            quantity=EXCLUDED.quantity, total=EXCLUDED.total
+            quantity=EXCLUDED.quantity, total=EXCLUDED.total,
+            category=EXCLUDED.category
     """, rows, page_size=500)
 
 
@@ -180,7 +187,8 @@ def upsert_crm_profiles_batch(conn, rows: list[dict]):
             tenure_code, tenure_label, monetary_code, monetary_label,
             ticket_code, ticket_label, status_code, status_label,
             personalidade_code, personalidade_label, valor_code, valor_label,
-            score, score_label, classified_at
+            score, score_label, classified_at,
+            categoria_preferida, tamanho_preferido
         ) VALUES (
             %(customer_id)s, %(email)s, %(first_name)s, %(last_name)s,
             %(orders_count)s, %(total_spent)s, %(avg_ticket)s, %(last_order_date)s, %(registration_date)s,
@@ -188,7 +196,8 @@ def upsert_crm_profiles_batch(conn, rows: list[dict]):
             %(tenure_code)s, %(tenure_label)s, %(monetary_code)s, %(monetary_label)s,
             %(ticket_code)s, %(ticket_label)s, %(status_code)s, %(status_label)s,
             %(personalidade_code)s, %(personalidade_label)s, %(valor_code)s, %(valor_label)s,
-            %(score)s, %(score_label)s, %(classified_at)s
+            %(score)s, %(score_label)s, %(classified_at)s,
+            %(categoria_preferida)s, %(tamanho_preferido)s
         )
         ON CONFLICT (customer_id) DO UPDATE SET
             orders_count=EXCLUDED.orders_count, total_spent=EXCLUDED.total_spent,
@@ -202,7 +211,9 @@ def upsert_crm_profiles_batch(conn, rows: list[dict]):
             personalidade_code=EXCLUDED.personalidade_code, personalidade_label=EXCLUDED.personalidade_label,
             valor_code=EXCLUDED.valor_code, valor_label=EXCLUDED.valor_label,
             score=EXCLUDED.score, score_label=EXCLUDED.score_label,
-            classified_at=EXCLUDED.classified_at
+            classified_at=EXCLUDED.classified_at,
+            categoria_preferida=EXCLUDED.categoria_preferida,
+            tamanho_preferido=EXCLUDED.tamanho_preferido
     """, rows, page_size=500)
 
 
@@ -274,6 +285,43 @@ def fetch_all(sql: str, params=None) -> list[dict]:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql, params or ())
         return [dict(r) for r in cur.fetchall()]
+
+
+def fetch_customer_preferences(conn) -> dict:
+    """Retorna dict customer_id → {categoria_preferida, tamanho_preferido} calculado dos order_items."""
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        WITH item_cats AS (
+            SELECT o.customer_id, i.category, SUM(i.quantity) AS qty
+            FROM order_items i
+            JOIN orders o ON o.woo_id = i.order_id
+            WHERE i.category IS NOT NULL AND i.category <> ''
+            GROUP BY o.customer_id, i.category
+        ),
+        best_cat AS (
+            SELECT DISTINCT ON (customer_id) customer_id, category
+            FROM item_cats ORDER BY customer_id, qty DESC
+        ),
+        item_sizes AS (
+            SELECT o.customer_id,
+                   upper((regexp_match(i.product_name, '[\s\-]+(PP|XGG|GG|XG|EG|P|M|G|U)\s*$'))[1]) AS size,
+                   SUM(i.quantity) AS qty
+            FROM order_items i
+            JOIN orders o ON o.woo_id = i.order_id
+            WHERE i.product_name ~* '[\s\-]+(PP|XGG|GG|XG|EG|P|M|G|U)\s*$'
+            GROUP BY o.customer_id, size
+        ),
+        best_size AS (
+            SELECT DISTINCT ON (customer_id) customer_id, size
+            FROM item_sizes ORDER BY customer_id, qty DESC
+        )
+        SELECT bc.customer_id,
+               bc.category AS categoria_preferida,
+               bs.size     AS tamanho_preferido
+        FROM best_cat bc
+        LEFT JOIN best_size bs ON bs.customer_id = bc.customer_id
+    """)
+    return {r["customer_id"]: dict(r) for r in cur.fetchall()}
 
 
 def fetch_order_stats(conn) -> dict:

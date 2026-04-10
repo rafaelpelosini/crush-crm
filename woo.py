@@ -46,6 +46,12 @@ class WooClient:
             params["modified_after"] = modified_after
         return self._get("customers", params)
 
+    def get_products(self) -> list:
+        return self._get("products", {
+            "_fields": "id,name,categories",
+            "status": "publish",
+        })
+
     def get_orders(self, modified_after: str = None) -> list:
         params = {
             "status": "completed,processing",

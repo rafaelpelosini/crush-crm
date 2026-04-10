@@ -434,6 +434,7 @@ df_novos = query("""
            c.registration_date,
            p.status_label, p.personalidade_label, p.valor_label,
            p.total_spent, p.orders_count,
+           p.categoria_preferida, p.tamanho_preferido,
            f.avg_days_between
     FROM customers c
     JOIN crm_profiles p ON p.customer_id = c.woo_id
@@ -456,9 +457,11 @@ else:
     df_novos["Status"]      = df_novos["status_label"]
     df_novos["Personalidade"] = df_novos["personalidade_label"]
     df_novos["Valor"]       = df_novos["valor_label"]
+    df_novos["Categoria"]   = df_novos["categoria_preferida"].fillna("—")
+    df_novos["Tamanho"]     = df_novos["tamanho_preferido"].fillna("—")
 
     st.dataframe(
-        df_novos[["Cliente","email","Cadastro","Pedidos","Gasto total","Frequência","Status","Personalidade","Valor"]],
+        df_novos[["Cliente","email","Cadastro","Pedidos","Gasto total","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
         hide_index=True, use_container_width=True
     )
 
