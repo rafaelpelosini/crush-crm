@@ -287,6 +287,72 @@ if not df_vendas.empty:
 
 st.divider()
 
+# ── Mudanças desde o último sync ─────────────────────────────────────────────
+
+section("Movimentações recentes",
+        "Clientes que mudaram de Status, Personalidade ou Valor desde o sync anterior. Boas notícias = clientes que melhoraram. Alertas = clientes que pioraram.")
+
+STATUS_ORDEM = {"S1": 1, "S2": 2, "S3": 3, "S4": 4, "S5": 5}
+
+df_hist = query("""
+    WITH ranked AS (
+        SELECT customer_id, synced_at, status_code, personalidade_code, valor_code, score,
+               LAG(status_code)      OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_status,
+               LAG(personalidade_code) OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_pessoa,
+               LAG(valor_code)       OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_valor,
+               LAG(score)            OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_score
+        FROM profile_history
+    )
+    SELECT h.customer_id, h.synced_at, h.status_code, h.prev_status,
+           h.personalidade_code, h.prev_pessoa,
+           h.valor_code, h.prev_valor,
+           h.score, h.prev_score,
+           p.first_name, p.last_name, p.email,
+           p.status_label, p.personalidade_label, p.valor_label
+    FROM ranked h
+    JOIN crm_profiles p ON p.customer_id = h.customer_id
+    WHERE h.prev_status IS NOT NULL
+      AND h.status_code != h.prev_status
+    ORDER BY h.synced_at DESC
+    LIMIT 100
+""")
+
+if df_hist.empty:
+    st.info("Ainda sem movimentações registradas. Aparecerá após o segundo sync.")
+else:
+    def classify_movimento(row):
+        antes = STATUS_ORDEM.get(row["prev_status"], 3)
+        depois = STATUS_ORDEM.get(row["status_code"], 3)
+        if depois < antes:
+            return "🟢 Melhorou"
+        elif depois > antes:
+            return "🔴 Piorou"
+        return "🟡 Lateral"
+
+    df_hist["Movimento"] = df_hist.apply(classify_movimento, axis=1)
+    df_hist["Cliente"]   = df_hist["first_name"] + " " + df_hist["last_name"]
+    df_hist["De"]        = df_hist["prev_status"] + " → " + df_hist["prev_pessoa"]
+    df_hist["Para"]      = df_hist["status_code"] + " → " + df_hist["personalidade_code"]
+    df_hist["Score Δ"]   = (df_hist["score"] - df_hist["prev_score"]).apply(
+                               lambda x: f"+{x}" if x > 0 else str(x))
+    df_hist["Data"]      = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
+
+    melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
+    piorou   = (df_hist["Movimento"] == "🔴 Piorou").sum()
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total de mudanças", len(df_hist))
+    m2.metric("🟢 Melhoraram", melhorou)
+    m3.metric("🔴 Pioraram", piorou)
+
+    br()
+    st.dataframe(
+        df_hist[["Movimento","Cliente","email","De","Para","Score Δ","Data"]],
+        hide_index=True, use_container_width=True
+    )
+
+st.divider()
+
 # ── Ações sugeridas ───────────────────────────────────────────────────────────
 
 section("Ações recomendadas",
