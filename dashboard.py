@@ -367,8 +367,11 @@ df_hist = query("""
 """)
 
 def freq_icon(days):
-    if days is None: return "—"
-    days = int(days)
+    if days is None or (hasattr(days, '__class__') and days != days): return "—"
+    try:
+        days = int(float(days))
+    except (TypeError, ValueError):
+        return "—"
     if days <= 30:   return f"🟢 {days}d"
     if days <= 60:   return f"🟡 {days}d"
     return                  f"🔴 {days}d"
