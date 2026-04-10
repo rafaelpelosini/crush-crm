@@ -30,45 +30,49 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.tooltip {
-    position: relative;
+.tip-wrap {
     display: inline-block;
+    position: relative;
+    vertical-align: middle;
+    margin-left: 6px;
 }
-.tooltip .tip-icon {
+.tip-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 15px;
-    height: 15px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    background: #e2e8f0;
-    color: #64748b;
-    font-size: 9px;
-    font-weight: 700;
-    margin-left: 5px;
+    background: #7c3aed;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
     cursor: help;
-    vertical-align: middle;
+    user-select: none;
+    flex-shrink: 0;
 }
-.tooltip .tiptext {
+.tip-wrap .tiptext {
     visibility: hidden;
     opacity: 0;
-    width: 230px;
+    width: 250px;
     background: #1e293b;
     color: #f1f5f9;
     font-size: 12px;
-    line-height: 1.5;
+    line-height: 1.6;
     text-align: left;
+    white-space: pre-line;
     border-radius: 8px;
-    padding: 10px 12px;
+    padding: 10px 13px;
     position: absolute;
-    z-index: 999;
+    z-index: 99999;
     bottom: 130%;
     left: 50%;
     transform: translateX(-50%);
-    transition: opacity 0.15s;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    transition: opacity 0.15s ease;
     pointer-events: none;
 }
-.tooltip:hover .tiptext {
+.tip-wrap:hover .tiptext {
     visibility: visible;
     opacity: 1;
 }
@@ -85,8 +89,7 @@ def query(sql: str) -> pd.DataFrame:
 
 def tip(text: str) -> str:
     """Retorna HTML de ícone ? com tooltip ao passar o mouse."""
-    safe = text.replace('"', "&quot;")
-    return f'<span class="tooltip"><span class="tip-icon">?</span><span class="tiptext">{safe}</span></span>'
+    return f'<span class="tip-wrap"><span class="tip-icon">?</span><span class="tiptext">{text}</span></span>'
 
 
 def section(title: str, tooltip: str):
