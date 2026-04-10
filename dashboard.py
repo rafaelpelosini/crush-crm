@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Funciona local (.env) e no Streamlit Cloud (st.secrets)
+DATABASE_URL = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
 EXP_PATH     = Path(__file__).parent / "exports"
 _engine      = create_engine(DATABASE_URL)
 
