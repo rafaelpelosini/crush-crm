@@ -152,6 +152,7 @@ if not df_vendas.empty:
     v_sem_ant  = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
     v_mes      = filtrar(df_vendas, ini_mes, hoje)
     v_mes_ant  = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
+    label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
 
     def delta_str(atual, anterior):
         if anterior == 0:
@@ -270,9 +271,6 @@ ACOES = [
     },
 ]
 
-# label do período de comparação mensal
-dias_no_mes = (hoje - ini_mes).days + 1
-label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
 
 cols = st.columns(len(ACOES))
 for col, a in zip(cols, ACOES):
