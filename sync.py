@@ -139,6 +139,7 @@ def run_sync(full: bool = False):
 
     with db.connect() as conn:
         db.upsert_crm_profiles_batch(conn, profile_rows)
+        db.save_profile_history(conn, profile_rows, now)
         db.save_sync_log(conn, now, len(raw_customers), len(raw_orders), time.time() - start)
 
     print(f"  {len(profile_rows)} perfis CRM atualizados\n")

@@ -92,10 +92,22 @@ def init():
                 duration_s  NUMERIC
             );
 
+            CREATE TABLE IF NOT EXISTS profile_history (
+                id                   SERIAL PRIMARY KEY,
+                customer_id          INTEGER,
+                synced_at            TEXT,
+                status_code          TEXT,
+                personalidade_code   TEXT,
+                valor_code           TEXT,
+                score                INTEGER
+            );
+
             CREATE INDEX IF NOT EXISTS idx_crm_status  ON crm_profiles(status_code);
             CREATE INDEX IF NOT EXISTS idx_crm_pessoa  ON crm_profiles(personalidade_code);
             CREATE INDEX IF NOT EXISTS idx_crm_score   ON crm_profiles(score);
             CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id);
+            CREATE INDEX IF NOT EXISTS idx_hist_cust   ON profile_history(customer_id);
+            CREATE INDEX IF NOT EXISTS idx_hist_sync   ON profile_history(synced_at);
         """)
 
 
@@ -163,6 +175,52 @@ def upsert_crm_profiles_batch(conn, rows: list[dict]):
             score=EXCLUDED.score, score_label=EXCLUDED.score_label,
             classified_at=EXCLUDED.classified_at
     """, rows, page_size=500)
+
+
+def save_profile_history(conn, rows: list[dict], synced_at: str):
+    """Salva no histórico apenas clientes que mudaram de status/personalidade/valor."""
+    if not rows:
+        return
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Lê último estado registrado no histórico para cada cliente
+    cur.execute("""
+        SELECT DISTINCT ON (customer_id)
+            customer_id, status_code, personalidade_code, valor_code, score
+        FROM profile_history
+        ORDER BY customer_id, synced_at DESC
+    """)
+    last = {r["customer_id"]: dict(r) for r in cur.fetchall()}
+
+    changed = []
+    for r in rows:
+        cid = r["customer_id"]
+        prev = last.get(cid)
+        if prev is None or (
+            prev["status_code"]        != r["status_code"] or
+            prev["personalidade_code"] != r["personalidade_code"] or
+            prev["valor_code"]         != r["valor_code"]
+        ):
+            changed.append({
+                "customer_id":        cid,
+                "synced_at":          synced_at,
+                "status_code":        r["status_code"],
+                "personalidade_code": r["personalidade_code"],
+                "valor_code":         r["valor_code"],
+                "score":              r["score"],
+            })
+
+    if changed:
+        psycopg2.extras.execute_batch(cur, """
+            INSERT INTO profile_history
+                (customer_id, synced_at, status_code, personalidade_code, valor_code, score)
+            VALUES
+                (%(customer_id)s, %(synced_at)s, %(status_code)s,
+                 %(personalidade_code)s, %(valor_code)s, %(score)s)
+        """, changed, page_size=500)
+        print(f"  {len(changed)} mudanças registradas no histórico")
+    else:
+        print("  Nenhuma mudança de classificação desde o último sync")
 
 
 def get_last_sync() -> str | None:

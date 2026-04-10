@@ -30,6 +30,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* Fix overflow clipping nos containers do Streamlit */
+[data-testid="stMarkdownContainer"],
+[data-testid="column"] > div,
+[data-testid="stVerticalBlock"] > div {
+    overflow: visible !important;
+}
+
 .tip-wrap {
     display: inline-block;
     position: relative;
@@ -45,16 +52,17 @@ st.markdown("""
     border-radius: 50%;
     background: #7c3aed;
     color: #fff;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 800;
     cursor: help;
     user-select: none;
-    flex-shrink: 0;
+    border: 2px solid #5b21b6;
+    box-shadow: 0 1px 4px rgba(124,58,237,0.3);
 }
 .tip-wrap .tiptext {
     visibility: hidden;
     opacity: 0;
-    width: 250px;
+    width: 260px;
     background: #1e293b;
     color: #f1f5f9;
     font-size: 12px;
@@ -65,11 +73,11 @@ st.markdown("""
     padding: 10px 13px;
     position: absolute;
     z-index: 99999;
-    bottom: 130%;
+    bottom: 140%;
     left: 50%;
     transform: translateX(-50%);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    transition: opacity 0.15s ease;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    transition: opacity 0.2s ease;
     pointer-events: none;
 }
 .tip-wrap:hover .tiptext {
