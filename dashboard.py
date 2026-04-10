@@ -326,12 +326,24 @@ df_hist = query("""
                LAG(personalidade_code) OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_pessoa,
                LAG(score)              OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_score
         FROM profile_history
+    ),
+    freq AS (
+        SELECT customer_id,
+               COUNT(*) AS n_orders,
+               CASE WHEN COUNT(*) >= 2
+                    THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created) - MIN(date_created))) / 86400.0 / NULLIF(COUNT(*)-1,0))
+                    ELSE NULL END AS avg_days_between
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+        GROUP BY customer_id
     )
     SELECT h.customer_id, h.synced_at, h.status_code, h.prev_status,
            h.personalidade_code, h.prev_pessoa,
            h.score, h.prev_score,
            p.first_name, p.last_name, p.email,
            p.total_spent, p.last_order_date,
+           c.registration_date,
+           f.avg_days_between,
            (SELECT ROUND(o.total::numeric,0)
             FROM orders o
             WHERE o.customer_id = h.customer_id
@@ -346,11 +358,20 @@ df_hist = query("""
             LIMIT 1 OFFSET 1) AS penultima_compra
     FROM ranked h
     JOIN crm_profiles p ON p.customer_id = h.customer_id
+    JOIN customers c ON c.woo_id = h.customer_id
+    LEFT JOIN freq f ON f.customer_id = h.customer_id
     WHERE h.prev_status IS NOT NULL
       AND h.status_code != h.prev_status
     ORDER BY h.synced_at DESC
     LIMIT 100
 """)
+
+def freq_icon(days):
+    if days is None: return "—"
+    days = int(days)
+    if days <= 30:   return f"🟢 {days}d"
+    if days <= 60:   return f"🟡 {days}d"
+    return                  f"🔴 {days}d"
 
 if df_hist.empty:
     st.info("Ainda sem movimentações registradas. Aparecerá após o segundo sync.")
@@ -364,14 +385,16 @@ else:
             return "🔴 Piorou"
         return "🟡 Lateral"
 
-    df_hist["Movimento"]  = df_hist.apply(classify_movimento, axis=1)
-    df_hist["Cliente"]    = df_hist["first_name"] + " " + df_hist["last_name"]
-    df_hist["De"]         = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"]) + " / " + df_hist["prev_pessoa"].map(PESSOA_LABEL).fillna(df_hist["prev_pessoa"])
-    df_hist["Para"]       = df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"]) + " / " + df_hist["personalidade_code"].map(PESSOA_LABEL).fillna(df_hist["personalidade_code"])
-    df_hist["Score Δ"]    = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
-    df_hist["Últ. compra"] = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Penúlt. compra"] = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Data"]       = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
+    df_hist["Movimento"]       = df_hist.apply(classify_movimento, axis=1)
+    df_hist["Cliente"]         = df_hist["first_name"] + " " + df_hist["last_name"]
+    df_hist["De"]              = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"]) + " / " + df_hist["prev_pessoa"].map(PESSOA_LABEL).fillna(df_hist["prev_pessoa"])
+    df_hist["Para"]            = df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"]) + " / " + df_hist["personalidade_code"].map(PESSOA_LABEL).fillna(df_hist["personalidade_code"])
+    df_hist["Score Δ"]         = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
+    df_hist["Últ. compra"]     = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Penúlt. compra"]  = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Cadastro"]        = pd.to_datetime(df_hist["registration_date"]).dt.strftime("%d/%m/%Y")
+    df_hist["Frequência"]      = df_hist["avg_days_between"].apply(freq_icon)
+    df_hist["Data"]            = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
 
     melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
     piorou   = (df_hist["Movimento"] == "🔴 Piorou").sum()
@@ -383,7 +406,48 @@ else:
 
     br()
     st.dataframe(
-        df_hist[["Movimento","Cliente","email","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
+        df_hist[["Movimento","Cliente","email","Cadastro","Frequência","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
+        hide_index=True, use_container_width=True
+    )
+
+st.divider()
+
+# ── Novos Crushes ─────────────────────────────────────────────────────────────
+
+section("Novos Crushes 💘",
+        "Clientes cadastrados nos últimos 30 dias que já fizeram pelo menos uma compra. São os novos relacionamentos a cultivar.")
+
+df_novos = query("""
+    SELECT c.woo_id, c.first_name, c.last_name, c.email,
+           c.registration_date,
+           p.frequencia_code, p.status_label, p.personalidade_label, p.valor_label,
+           p.total_spent, p.orders_count,
+           CASE WHEN p.orders_count >= 2
+                THEN ROUND(EXTRACT(EPOCH FROM (p.last_order_date::timestamp - c.registration_date::timestamp)) / 86400.0 / NULLIF(p.orders_count-1,0))
+                ELSE NULL END AS avg_days_between
+    FROM customers c
+    JOIN crm_profiles p ON p.customer_id = c.woo_id
+    WHERE c.registration_date >= NOW() - INTERVAL '30 days'
+      AND p.orders_count >= 1
+    ORDER BY c.registration_date DESC
+""")
+
+if df_novos.empty:
+    st.info("Nenhum novo cliente com compra nos últimos 30 dias.")
+else:
+    st.metric("Novos Crushes (30 dias)", len(df_novos))
+    br()
+    df_novos["Cliente"]     = df_novos["first_name"] + " " + df_novos["last_name"]
+    df_novos["Cadastro"]    = pd.to_datetime(df_novos["registration_date"]).dt.strftime("%d/%m/%Y")
+    df_novos["Pedidos"]     = df_novos["orders_count"]
+    df_novos["Gasto total"] = df_novos["total_spent"].apply(lambda x: f"R$ {x:,.0f}")
+    df_novos["Frequência"]  = df_novos["avg_days_between"].apply(freq_icon)
+    df_novos["Status"]      = df_novos["status_label"]
+    df_novos["Personalidade"] = df_novos["personalidade_label"]
+    df_novos["Valor"]       = df_novos["valor_label"]
+
+    st.dataframe(
+        df_novos[["Cliente","email","Cadastro","Pedidos","Gasto total","Frequência","Status","Personalidade","Valor"]],
         hide_index=True, use_container_width=True
     )
 
