@@ -13,9 +13,14 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+def _clean_url(url: str) -> str:
+    """Remove query string da URL — parâmetros como sslmode são passados explicitamente."""
+    return url.split("?")[0] if url else url
+
+
 @contextmanager
 def connect():
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_clean_url(DATABASE_URL), sslmode="require")
     conn.autocommit = False
     try:
         yield conn
