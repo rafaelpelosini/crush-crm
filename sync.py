@@ -88,6 +88,7 @@ def run_sync(full: bool = False):
     print(f"  {len(raw_orders)} pedidos recebidos\n")
 
     order_rows = []
+    item_rows  = []
     for o in raw_orders:
         order_rows.append({
             "woo_id":         o["id"],
@@ -97,9 +98,19 @@ def run_sync(full: bool = False):
             "total":          float(o.get("total", 0)),
             "status":         o.get("status", ""),
         })
+        for item in o.get("line_items", []):
+            item_rows.append({
+                "order_id":     o["id"],
+                "product_id":   item.get("product_id", 0),
+                "product_name": item.get("name", ""),
+                "quantity":     int(item.get("quantity", 1)),
+                "total":        float(item.get("total", 0)),
+            })
 
     with db.connect() as conn:
         db.upsert_orders_batch(conn, order_rows)
+        db.upsert_order_items_batch(conn, item_rows)
+    print(f"  {len(item_rows)} itens de pedido salvos\n")
 
     # ── 3. Agrega e classifica ────────────────────────────────────────────
     print("▶ Calculando métricas e classificando clientes...")

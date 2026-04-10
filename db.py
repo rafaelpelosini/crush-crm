@@ -89,6 +89,16 @@ def init():
                 classified_at        TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS order_items (
+                id           SERIAL PRIMARY KEY,
+                order_id     INTEGER,
+                product_id   INTEGER,
+                product_name TEXT,
+                quantity     INTEGER,
+                total        NUMERIC,
+                UNIQUE(order_id, product_id)
+            );
+
             CREATE TABLE IF NOT EXISTS sync_log (
                 id          SERIAL PRIMARY KEY,
                 synced_at   TEXT,
@@ -107,7 +117,9 @@ def init():
                 score                INTEGER
             );
 
-            CREATE INDEX IF NOT EXISTS idx_crm_status  ON crm_profiles(status_code);
+            CREATE INDEX IF NOT EXISTS idx_items_order   ON order_items(order_id);
+            CREATE INDEX IF NOT EXISTS idx_items_product ON order_items(product_id);
+            CREATE INDEX IF NOT EXISTS idx_crm_status    ON crm_profiles(status_code);
             CREATE INDEX IF NOT EXISTS idx_crm_pessoa  ON crm_profiles(personalidade_code);
             CREATE INDEX IF NOT EXISTS idx_crm_score   ON crm_profiles(score);
             CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id);
@@ -141,6 +153,18 @@ def upsert_orders_batch(conn, rows: list[dict]):
         VALUES (%(woo_id)s, %(customer_id)s, %(customer_email)s, %(date_created)s, %(total)s, %(status)s)
         ON CONFLICT (woo_id) DO UPDATE SET
             total=EXCLUDED.total, status=EXCLUDED.status
+    """, rows, page_size=500)
+
+
+def upsert_order_items_batch(conn, rows: list[dict]):
+    if not rows:
+        return
+    cur = conn.cursor()
+    psycopg2.extras.execute_batch(cur, """
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, total)
+        VALUES (%(order_id)s, %(product_id)s, %(product_name)s, %(quantity)s, %(total)s)
+        ON CONFLICT (order_id, product_id) DO UPDATE SET
+            quantity=EXCLUDED.quantity, total=EXCLUDED.total
     """, rows, page_size=500)
 
 
