@@ -649,59 +649,69 @@ df_items_exist = query("SELECT COUNT(*) n FROM order_items").iloc[0]["n"]
 if df_items_exist == 0:
     st.info("Dados de produto ainda não disponíveis. Rode um sync completo: `python sync.py --full`")
 else:
+    # Remove sufixo de tamanho: "Camiseta X - M" → "Camiseta X"
+    STRIP_SIZE = "regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{1,3}$', '')"
+
     pt1, pt2, pt3 = st.tabs(["🏆 Mais vendidos", "💎 Preferidos dos VIPs", "🔄 Geram 2ª compra"])
 
     with pt1:
-        df_top = query("""
-            SELECT i.product_name produto,
-                   COUNT(DISTINCT i.order_id)  pedidos,
-                   SUM(i.quantity)             unidades,
-                   ROUND(SUM(i.total)::numeric, 0) receita,
-                   ROUND(AVG(i.total)::numeric, 0) ticket_medio
+        df_top = query(f"""
+            SELECT {STRIP_SIZE} AS produto,
+                   COUNT(DISTINCT i.order_id)       pedidos,
+                   SUM(i.quantity)                  unidades,
+                   ROUND(SUM(i.total)::numeric, 0)  receita,
+                   ROUND(AVG(i.total / NULLIF(i.quantity,0))::numeric, 0) ticket_unit
             FROM order_items i
             JOIN orders o ON o.woo_id = i.order_id
             WHERE o.status NOT IN ('cancelled','refunded','failed')
               AND i.product_name != ''
-            GROUP BY i.product_name
+            GROUP BY {STRIP_SIZE}
             ORDER BY receita DESC
             LIMIT 30
         """)
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            fig_top = px.bar(df_top.head(15), x="receita", y="produto", orientation="h",
-                             text=df_top.head(15)["receita"].apply(lambda x: f"R$ {x:,.0f}"),
-                             color_discrete_sequence=["#7c3aed"],
-                             labels={"receita": "Receita", "produto": ""})
-            fig_top.update_traces(textposition="outside")
-            fig_top.update_layout(height=450, margin=dict(l=0, r=80, t=10, b=0), showlegend=False)
-            st.plotly_chart(fig_top, use_container_width=True)
-        with c2:
-            st.dataframe(df_top[["produto","pedidos","unidades","receita"]],
-                         hide_index=True, use_container_width=True)
+
+        fig_top = px.bar(
+            df_top.head(15), x="receita", y="produto", orientation="h",
+            text=df_top.head(15)["receita"].apply(lambda x: f"R$ {x:,.0f}"),
+            color_discrete_sequence=["#7c3aed"],
+            labels={"receita": "Receita (R$)", "produto": ""}
+        )
+        fig_top.update_traces(textposition="outside")
+        fig_top.update_layout(height=480, margin=dict(l=0, r=100, t=10, b=0), showlegend=False)
+        st.plotly_chart(fig_top, use_container_width=True)
+
+        df_top_fmt = df_top.copy()
+        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(lambda x: f"R$ {x:,.0f}")
+        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(lambda x: f"R$ {x:,.0f}")
+        df_top_fmt.columns        = ["Produto", "Pedidos", "Unidades", "Receita", "Ticket unit."]
+        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True)
 
     with pt2:
-        df_vip_prod = query("""
-            SELECT i.product_name produto,
-                   COUNT(DISTINCT i.order_id) pedidos,
-                   ROUND(SUM(i.total)::numeric, 0) receita,
-                   ROUND(AVG(p.score)::numeric, 1) score_medio
+        df_vip_prod = query(f"""
+            SELECT {STRIP_SIZE} AS produto,
+                   COUNT(DISTINCT i.order_id)      pedidos,
+                   SUM(i.quantity)                 unidades,
+                   ROUND(SUM(i.total)::numeric, 0) receita
             FROM order_items i
             JOIN orders o ON o.woo_id = i.order_id
             JOIN crm_profiles p ON p.customer_id = o.customer_id
             WHERE p.valor_code IN ('V1','V2')
               AND o.status NOT IN ('cancelled','refunded','failed')
               AND i.product_name != ''
-            GROUP BY i.product_name
+            GROUP BY {STRIP_SIZE}
             ORDER BY receita DESC
             LIMIT 20
         """)
         st.caption("Produtos mais comprados pelas clientes de alto valor (VIP e Alto Valor)")
+        df_vip_prod["receita"] = df_vip_prod["receita"].apply(lambda x: f"R$ {x:,.0f}")
+        df_vip_prod.columns    = ["Produto", "Pedidos", "Unidades", "Receita"]
         st.dataframe(df_vip_prod, hide_index=True, use_container_width=True)
 
     with pt3:
-        df_seg2 = query("""
-            SELECT i.product_name produto,
-                   COUNT(DISTINCT o.customer_id) clientes,
+        df_seg2 = query(f"""
+            SELECT {STRIP_SIZE} AS produto,
+                   COUNT(DISTINCT o.customer_id)   clientes,
+                   SUM(i.quantity)                 unidades,
                    ROUND(SUM(i.total)::numeric, 0) receita
             FROM order_items i
             JOIN orders o ON o.woo_id = i.order_id
@@ -709,11 +719,13 @@ else:
             WHERE p.frequencia_code != 'F1'
               AND o.status NOT IN ('cancelled','refunded','failed')
               AND i.product_name != ''
-            GROUP BY i.product_name
+            GROUP BY {STRIP_SIZE}
             ORDER BY clientes DESC
             LIMIT 20
         """)
         st.caption("Produtos comprados por clientes que fizeram 2+ pedidos — indicam o que gera recorrência")
+        df_seg2["receita"] = df_seg2["receita"].apply(lambda x: f"R$ {x:,.0f}")
+        df_seg2.columns    = ["Produto", "Clientes", "Unidades", "Receita"]
         st.dataframe(df_seg2, hide_index=True, use_container_width=True)
 
 st.divider()
