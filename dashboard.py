@@ -331,7 +331,7 @@ df_hist = query("""
         SELECT customer_id,
                COUNT(*) AS n_orders,
                CASE WHEN COUNT(*) >= 2
-                    THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created) - MIN(date_created))) / 86400.0 / NULLIF(COUNT(*)-1,0))
+                    THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created::timestamp) - MIN(date_created::timestamp))) / 86400.0 / NULLIF(COUNT(*)-1,0))
                     ELSE NULL END AS avg_days_between
         FROM orders
         WHERE status NOT IN ('cancelled','refunded','failed')
@@ -418,16 +418,24 @@ section("Novos Crushes 💘",
         "Clientes cadastrados nos últimos 30 dias que já fizeram pelo menos uma compra. São os novos relacionamentos a cultivar.")
 
 df_novos = query("""
+    WITH freq AS (
+        SELECT customer_id,
+               CASE WHEN COUNT(*) >= 2
+                    THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created::timestamp) - MIN(date_created::timestamp))) / 86400.0 / NULLIF(COUNT(*)-1,0))
+                    ELSE NULL END AS avg_days_between
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+        GROUP BY customer_id
+    )
     SELECT c.woo_id, c.first_name, c.last_name, c.email,
            c.registration_date,
-           p.frequencia_code, p.status_label, p.personalidade_label, p.valor_label,
+           p.status_label, p.personalidade_label, p.valor_label,
            p.total_spent, p.orders_count,
-           CASE WHEN p.orders_count >= 2
-                THEN ROUND(EXTRACT(EPOCH FROM (p.last_order_date::timestamp - c.registration_date::timestamp)) / 86400.0 / NULLIF(p.orders_count-1,0))
-                ELSE NULL END AS avg_days_between
+           f.avg_days_between
     FROM customers c
     JOIN crm_profiles p ON p.customer_id = c.woo_id
-    WHERE c.registration_date >= NOW() - INTERVAL '30 days'
+    LEFT JOIN freq f ON f.customer_id = c.woo_id
+    WHERE c.registration_date::timestamp >= NOW() - INTERVAL '30 days'
       AND p.orders_count >= 1
     ORDER BY c.registration_date DESC
 """)
