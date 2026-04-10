@@ -423,25 +423,48 @@ st.divider()
 
 st.markdown("#### Audiências para a agência")
 
-csvs = sorted(EXP_PATH.glob("*.csv"), reverse=True) if EXP_PATH.exists() else []
-if csvs:
-    rows = []
-    for f in csvs:
-        if "resumo" in f.name:
-            continue
-        parts = f.stem.split("_", 1)
-        data  = parts[0] if len(parts) == 2 else "—"
-        nome  = parts[1].replace("_", " ").title() if len(parts) == 2 else f.stem
-        linhas = sum(1 for _ in open(f, encoding="utf-8")) - 1
-        rows.append({"Data": data, "Audiência": nome, "Clientes": linhas, "Arquivo": f.name})
+SEGMENTS_DASH = {
+    "VIPs":                  ("status_code IN ('S1','S2') AND valor_code IN ('V1','V2')",             "Retenção premium"),
+    "Ativos":                ("status_code = 'S1'",                                                   "Manter engajados"),
+    "Sugar Lovers":          ("personalidade_code = 'P1'",                                            "Alto valor e frequência"),
+    "Lovers":                ("personalidade_code IN ('P1','P2')",                                    "Clientes frequentes"),
+    "Esfriando":             ("status_code = 'S3'",                                                   "Reativação suave"),
+    "Em Risco":              ("status_code = 'S4'",                                                   "Última chance"),
+    "Em Risco (Alto Valor)": ("status_code = 'S4' AND valor_code IN ('V1','V2','V3')",               "Prioridade máxima"),
+    "Perdidos (Alto Valor)": ("status_code = 'S5' AND valor_code IN ('V1','V2')",                    "Win-back"),
+    "Crush Promissor":       ("personalidade_code = 'P3' AND recencia_code IN ('R1','R2')",           "Converter para recorrência"),
+    "Segundo Pedido":        ("frequencia_code = 'F1' AND recencia_code = 'R1'",                     "Induzir 2ª compra"),
+    "Lookalike Seed":        ("personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",     "Seed Meta Ads"),
+    "Supressão":             ("status_code = 'S5' AND valor_code IN ('V4','V5')",                    "Não gastar verba"),
+    "Retargeting":           ("status_code IN ('S1','S2') AND recencia_code IN ('R1','R2')",          "Lançamentos e novidades"),
+}
 
-    df_exp = pd.DataFrame(rows)
-    st.dataframe(df_exp, hide_index=True, use_container_width=True)
+seg_info = []
+for nome, (filtro, descricao) in SEGMENTS_DASH.items():
+    n = query(f"SELECT COUNT(*) n FROM crm_profiles WHERE {filtro}").iloc[0]["n"]
+    seg_info.append({"Audiência": nome, "Clientes": int(n), "Descrição": descricao})
 
-    st.markdown("**Baixar audiência:**")
-    escolha = st.selectbox("", [r["Arquivo"] for r in rows], label_visibility="collapsed")
-    if escolha:
-        with open(EXP_PATH / escolha, "rb") as f:
-            st.download_button("⬇️ Baixar CSV", f, file_name=escolha, mime="text/csv")
-else:
-    st.info("Nenhuma audiência exportada ainda. Rode o sync primeiro.")
+df_seg = pd.DataFrame(seg_info)
+st.dataframe(df_seg, hide_index=True, use_container_width=True)
+
+st.markdown("**Baixar audiência:**")
+escolha = st.selectbox("", list(SEGMENTS_DASH.keys()), label_visibility="collapsed")
+
+if escolha:
+    filtro = SEGMENTS_DASH[escolha][0]
+    df_dl = query(f"""
+        SELECT email, first_name, last_name, score,
+               status_label, personalidade_label, valor_label, score_label,
+               orders_count, ROUND(total_spent,2) total_spent, last_order_date
+        FROM crm_profiles
+        WHERE {filtro}
+        ORDER BY score DESC
+    """)
+    hoje_str = now_brt().strftime("%Y-%m-%d")
+    nome_arquivo = f"{hoje_str}_{escolha.lower().replace(' ', '_')}.csv"
+    st.download_button(
+        "⬇️ Baixar CSV",
+        df_dl.to_csv(index=False).encode("utf-8"),
+        file_name=nome_arquivo,
+        mime="text/csv",
+    )
