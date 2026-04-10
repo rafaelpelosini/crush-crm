@@ -174,6 +174,12 @@ df_valor   = query("""
     FROM crm_profiles GROUP BY valor_code, valor_label ORDER BY valor_code
 """)
 
+df_tenure  = query(f"""
+    SELECT tenure_code code, tenure_label label, COUNT(*) n,
+           ROUND(100.0*COUNT(*) / NULLIF({total},0), 1) pct
+    FROM crm_profiles GROUP BY tenure_code, tenure_label ORDER BY tenure_code
+""")
+
 # ── Autenticação ─────────────────────────────────────────────────────────────
 
 if "autenticado" not in st.session_state:
@@ -535,6 +541,26 @@ with c2:
     fig2.update_layout(showlegend=False, height=300, margin=dict(l=0,r=60,t=10,b=0))
     st.plotly_chart(fig2, use_container_width=True)
 
+# ── Antiguidade da base ───────────────────────────────────────────────────────
+
+section("Antiguidade da base",
+        "Há quanto tempo cada cliente está cadastrada:\n🌱 Primeiro encontro: até 90 dias\n🙂 Ficando: 91–180 dias\n💘 Crush: 181–365 dias\n❤️ Namoro: 1–2 anos\n💞 Namoro sério: 2–3 anos\n🏡 União estável: 3–4 anos\n💍 Casamento: 4–5 anos\n👵 Amor de longa data: 5+ anos (base desde 2020)")
+
+cores_t = {
+    "T1":"#22c55e","T2":"#4ade80","T3":"#86efac",
+    "T4":"#f59e0b","T5":"#fb923c",
+    "T6":"#94a3b8","T7":"#64748b","T8":"#475569",
+}
+fig_t = px.bar(
+    df_tenure, x="n", y="label", orientation="h",
+    color="code", color_discrete_map=cores_t,
+    text=df_tenure.apply(lambda r: f"{r['n']:,.0f} ({r['pct']}%)", axis=1),
+    labels={"n":"Clientes","label":""},
+)
+fig_t.update_traces(textposition="outside")
+fig_t.update_layout(showlegend=False, height=320, margin=dict(l=0,r=80,t=10,b=0))
+st.plotly_chart(fig_t, use_container_width=True)
+
 # ── Valor da Relação ──────────────────────────────────────────────────────────
 
 section("Valor da Relação",
@@ -567,6 +593,19 @@ st.divider()
 
 section("Segmentos de ação", "Listas detalhadas de clientes por segmento. Use para revisar manualmente ou exportar para campanhas.")
 
+TENURE_GRUPOS = {
+    "Toda a base":                   "",
+    "Recentes — últimos 18 meses":   "AND tenure_code IN ('T1','T2','T3')",
+    "Intermediárias — 2022 a 2024":  "AND tenure_code IN ('T4','T5')",
+    "Base antiga — 2020 a 2021":     "AND tenure_code IN ('T6','T7','T8')",
+}
+tenure_filtro_label = st.selectbox(
+    "Recorte por antiguidade",
+    list(TENURE_GRUPOS.keys()),
+    help="Filtra os segmentos abaixo por quanto tempo a cliente está na base",
+)
+tenure_filtro = TENURE_GRUPOS[tenure_filtro_label]
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💎 VIPs",
     "🚨 Em risco (alto valor)",
@@ -577,61 +616,62 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.caption("Clientes que gastaram R$ 5.000+ no total. Tratamento VIP — não perder por nada.")
-    df = query("""
+    df = query(f"""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
                ROUND(avg_ticket,0) ticket_medio, last_order_date ultima_compra,
-               score, score_label
+               tenure_label antiguidade, score, score_label
         FROM crm_profiles
-        WHERE valor_code = 'V1'
+        WHERE valor_code = 'V1' {tenure_filtro}
         ORDER BY score DESC
     """)
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab2:
-    df = query("""
+    df = query(f"""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
                last_order_date ultima_compra, recencia_label temperatura,
-               score
+               tenure_label antiguidade, score
         FROM crm_profiles
-        WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
+        WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3') {tenure_filtro}
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes com histórico relevante (R$500+) que não compram há 181–360 dias.")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab3:
-    df = query("""
+    df = query(f"""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, score
+               last_order_date ultima_compra, tenure_label antiguidade, score
         FROM crm_profiles
-        WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
+        WHERE frequencia_code = 'F1' AND recencia_code = 'R1' {tenure_filtro}
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes que fizeram 1 pedido nos últimos 90 dias — a 2ª compra é o maior preditor de fidelização.")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab4:
-    df = query("""
+    df = query(f"""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, recencia_label temperatura, score
+               last_order_date ultima_compra, recencia_label temperatura,
+               tenure_label antiguidade, score
         FROM crm_profiles
-        WHERE status_code = 'S3'
+        WHERE status_code = 'S3' {tenure_filtro}
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes que já compraram bem mas estão reduzindo frequência (91–180 dias sem comprar).")
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 with tab5:
-    df = query("""
+    df = query(f"""
         SELECT first_name || ' ' || last_name nome, email,
                orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, score
+               last_order_date ultima_compra, tenure_label antiguidade, score
         FROM crm_profiles
-        WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
+        WHERE status_code = 'S5' AND valor_code IN ('V1','V2') {tenure_filtro}
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes de alto valor (R$2.500+) que sumiram há mais de 1 ano — campanha win-back.")
@@ -753,7 +793,7 @@ SEGMENTS_DASH = {
 
 seg_info = []
 for nome, (filtro, descricao) in SEGMENTS_DASH.items():
-    n = query(f"SELECT COUNT(*) n FROM crm_profiles WHERE {filtro}").iloc[0]["n"]
+    n = query(f"SELECT COUNT(*) n FROM crm_profiles WHERE {filtro} {tenure_filtro}").iloc[0]["n"]
     seg_info.append({"Audiência": nome, "Clientes": int(n), "Descrição": descricao})
 
 df_seg = pd.DataFrame(seg_info)
@@ -763,11 +803,13 @@ st.markdown("**Baixar audiência:**")
 escolha = st.selectbox("", list(SEGMENTS_DASH.keys()), label_visibility="collapsed")
 
 if escolha:
-    filtro = SEGMENTS_DASH[escolha][0]
+    filtro_seg = SEGMENTS_DASH[escolha][0]
+    filtro_completo = f"{filtro_seg} {tenure_filtro}".strip()
+    sufixo_tenure = tenure_filtro_label.split("—")[0].strip().lower().replace(" ", "_") if tenure_filtro else "todos"
     nome_arquivo = f"{hoje_str}_{escolha.lower().replace(' ', '_').replace('(','').replace(')','')}.csv"
     st.download_button(
         "⬇️ Baixar CSV",
-        csv_bytes(filtro),
+        csv_bytes(filtro_completo),
         file_name=nome_arquivo,
         mime="text/csv",
     )
