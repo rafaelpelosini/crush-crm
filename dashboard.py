@@ -310,21 +310,34 @@ section("Movimentações recentes",
 
 STATUS_ORDEM = {"S1": 1, "S2": 2, "S3": 3, "S4": 4, "S5": 5}
 
+STATUS_LABEL  = {"S1":"✅ Ativa","S2":"⚠️ Oscilando","S3":"🧊 Esfriando","S4":"🚨 Em risco","S5":"👻 Perdida"}
+PESSOA_LABEL  = {"P1":"💎 Sugar Lover","P2":"🔥 Lover","P3":"💘 Crush Promissor","P4":"🙂 Date Casual","P5":"👻 Ghost"}
+
 df_hist = query("""
     WITH ranked AS (
         SELECT customer_id, synced_at, status_code, personalidade_code, valor_code, score,
-               LAG(status_code)      OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_status,
+               LAG(status_code)        OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_status,
                LAG(personalidade_code) OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_pessoa,
-               LAG(valor_code)       OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_valor,
-               LAG(score)            OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_score
+               LAG(score)              OVER (PARTITION BY customer_id ORDER BY synced_at) AS prev_score
         FROM profile_history
     )
     SELECT h.customer_id, h.synced_at, h.status_code, h.prev_status,
            h.personalidade_code, h.prev_pessoa,
-           h.valor_code, h.prev_valor,
            h.score, h.prev_score,
            p.first_name, p.last_name, p.email,
-           p.status_label, p.personalidade_label, p.valor_label
+           p.total_spent, p.last_order_date,
+           (SELECT ROUND(o.total::numeric,0)
+            FROM orders o
+            WHERE o.customer_id = h.customer_id
+              AND o.status NOT IN ('cancelled','refunded','failed')
+            ORDER BY o.date_created DESC
+            LIMIT 1) AS ultima_compra,
+           (SELECT ROUND(o.total::numeric,0)
+            FROM orders o
+            WHERE o.customer_id = h.customer_id
+              AND o.status NOT IN ('cancelled','refunded','failed')
+            ORDER BY o.date_created DESC
+            LIMIT 1 OFFSET 1) AS penultima_compra
     FROM ranked h
     JOIN crm_profiles p ON p.customer_id = h.customer_id
     WHERE h.prev_status IS NOT NULL
@@ -345,13 +358,14 @@ else:
             return "🔴 Piorou"
         return "🟡 Lateral"
 
-    df_hist["Movimento"] = df_hist.apply(classify_movimento, axis=1)
-    df_hist["Cliente"]   = df_hist["first_name"] + " " + df_hist["last_name"]
-    df_hist["De"]        = df_hist["prev_status"] + " → " + df_hist["prev_pessoa"]
-    df_hist["Para"]      = df_hist["status_code"] + " → " + df_hist["personalidade_code"]
-    df_hist["Score Δ"]   = (df_hist["score"] - df_hist["prev_score"]).apply(
-                               lambda x: f"+{x}" if x > 0 else str(x))
-    df_hist["Data"]      = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
+    df_hist["Movimento"]  = df_hist.apply(classify_movimento, axis=1)
+    df_hist["Cliente"]    = df_hist["first_name"] + " " + df_hist["last_name"]
+    df_hist["De"]         = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"]) + " / " + df_hist["prev_pessoa"].map(PESSOA_LABEL).fillna(df_hist["prev_pessoa"])
+    df_hist["Para"]       = df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"]) + " / " + df_hist["personalidade_code"].map(PESSOA_LABEL).fillna(df_hist["personalidade_code"])
+    df_hist["Score Δ"]    = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
+    df_hist["Últ. compra"] = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Penúlt. compra"] = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Data"]       = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
 
     melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
     piorou   = (df_hist["Movimento"] == "🔴 Piorou").sum()
@@ -363,7 +377,7 @@ else:
 
     br()
     st.dataframe(
-        df_hist[["Movimento","Cliente","email","De","Para","Score Δ","Data"]],
+        df_hist[["Movimento","Cliente","email","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
         hide_index=True, use_container_width=True
     )
 
