@@ -49,7 +49,7 @@ class WooClient:
     def get_orders(self, modified_after: str = None) -> list:
         params = {
             "status": "completed,processing",
-            "_fields": "id,customer_id,customer_email,date_created,total,status",
+            "_fields": "id,customer_id,customer_email,date_created,total,status,line_items",
         }
         if modified_after:
             params["modified_after"] = modified_after
