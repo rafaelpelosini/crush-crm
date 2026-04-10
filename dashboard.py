@@ -174,6 +174,22 @@ df_valor   = query("""
     FROM crm_profiles GROUP BY valor_code, valor_label ORDER BY valor_code
 """)
 
+# ── Autenticação ─────────────────────────────────────────────────────────────
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.markdown("## 💘 Crush CRM")
+    senha = st.text_input("Senha de acesso", type="password")
+    if st.button("Entrar"):
+        if senha == st.secrets.get("SENHA", "IloveAmp"):
+            st.session_state.autenticado = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta.")
+    st.stop()
+
 # ── Header ────────────────────────────────────────────────────────────────────
 
 st.markdown("## 💘 Crush CRM")
