@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
@@ -17,6 +18,8 @@ load_dotenv()
 DATABASE_URL = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
 EXP_PATH     = Path(__file__).parent / "exports"
 _engine      = create_engine(DATABASE_URL)
+
+BRASILIA = timezone(timedelta(hours=-3))
 
 st.set_page_config(
     page_title="Crush CRM",
@@ -48,13 +51,29 @@ def br(n=1):
         st.markdown("<br>", unsafe_allow_html=True)
 
 
+def now_brt():
+    return datetime.now(BRASILIA)
+
+
+def brt(iso_str: str) -> str:
+    """Converte string ISO UTC para horário de Brasília formatado."""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(BRASILIA).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return iso_str[:16]
+
+
 # ── Dados principais ──────────────────────────────────────────────────────────
 
 total      = query("SELECT COUNT(*) n FROM crm_profiles").iloc[0]["n"]
 score_med  = query("SELECT ROUND(AVG(score),1) v FROM crm_profiles").iloc[0]["v"]
 receita    = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles").iloc[0]["v"]
 last_sync  = query("SELECT synced_at FROM sync_log ORDER BY id DESC LIMIT 1")
-last_sync  = last_sync.iloc[0]["synced_at"][:16].replace("T", " ") if not last_sync.empty else "—"
+last_sync_raw = last_sync.iloc[0]["synced_at"] if not last_sync.empty else None
+last_sync_str = brt(last_sync_raw) if last_sync_raw else "—"
 
 df_status  = query(f"""
     SELECT status_code code, status_label label, COUNT(*) n,
@@ -79,7 +98,7 @@ df_valor   = query("""
 # ── Header ────────────────────────────────────────────────────────────────────
 
 st.markdown("## 💘 Crush CRM")
-st.markdown(f"<span style='color:#aaa;font-size:13px'>Último sync: {last_sync}</span>",
+st.markdown(f"<span style='color:#aaa;font-size:13px'>Último sync: {last_sync_str} (horário de Brasília)</span>",
             unsafe_allow_html=True)
 st.divider()
 
@@ -100,6 +119,171 @@ card(k5, "💰", "Receita total",       f"R$ {receita:,.0f}")
 card(k6, "⭐", "Score médio",         f"{score_med}",     "de 100 pontos")
 
 br()
+
+# ── Vendas: dia / semana / mês ────────────────────────────────────────────────
+
+st.markdown("#### Vendas por período")
+
+df_vendas = query("""
+    SELECT date_created, total
+    FROM orders
+    WHERE status NOT IN ('cancelled','refunded','failed')
+""")
+
+if not df_vendas.empty:
+    df_vendas["date_created"] = pd.to_datetime(df_vendas["date_created"])
+    hoje = now_brt().date()
+    ontem = hoje - timedelta(days=1)
+    ini_semana = hoje - timedelta(days=hoje.weekday())
+    ini_semana_ant = ini_semana - timedelta(weeks=1)
+    fim_semana_ant = ini_semana - timedelta(days=1)
+    ini_mes = hoje.replace(day=1)
+    ini_mes_ant = (ini_mes - timedelta(days=1)).replace(day=1)
+    fim_mes_ant = ini_mes - timedelta(days=1)
+
+    def filtrar(df, d_ini, d_fim):
+        mask = (df["date_created"].dt.date >= d_ini) & (df["date_created"].dt.date <= d_fim)
+        return df[mask]["total"].sum()
+
+    v_hoje     = filtrar(df_vendas, hoje, hoje)
+    v_ontem    = filtrar(df_vendas, ontem, ontem)
+    v_semana   = filtrar(df_vendas, ini_semana, hoje)
+    v_sem_ant  = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
+    v_mes      = filtrar(df_vendas, ini_mes, hoje)
+    v_mes_ant  = filtrar(df_vendas, ini_mes_ant, fim_mes_ant)
+
+    def delta_str(atual, anterior):
+        if anterior == 0:
+            return None
+        pct = (atual - anterior) / anterior * 100
+        sinal = "▲" if pct >= 0 else "▼"
+        cor = "green" if pct >= 0 else "red"
+        return f"<span style='color:{cor}'>{sinal} {abs(pct):.1f}% vs período anterior</span>"
+
+    v1, v2, v3 = st.columns(3)
+
+    for col, titulo, atual, anterior, label_ant in [
+        (v1, "Hoje",        v_hoje,   v_ontem,   "vs ontem"),
+        (v2, "Esta semana", v_semana, v_sem_ant, "vs semana passada"),
+        (v3, "Este mês",    v_mes,    v_mes_ant, "vs mês passado"),
+    ]:
+        d = delta_str(atual, anterior)
+        col.markdown(f"""
+        <div style="background:#f8fafc;border-radius:12px;padding:20px 24px;height:110px;border:1px solid #e2e8f0">
+            <div style="font-size:13px;color:#888;margin-bottom:4px">{titulo}</div>
+            <div style="font-size:26px;font-weight:700">R$ {atual:,.0f}</div>
+            {("<div style='font-size:12px;margin-top:4px'>" + d + "</div>") if d else ""}
+        </div>
+        """, unsafe_allow_html=True)
+
+    br()
+
+    # Gráfico de vendas diárias — últimos 30 dias
+    df_30 = df_vendas[df_vendas["date_created"].dt.date >= (hoje - timedelta(days=29))].copy()
+    df_30["dia"] = df_30["date_created"].dt.date
+    df_diario = df_30.groupby("dia")["total"].sum().reset_index()
+    df_diario.columns = ["Data", "Receita"]
+
+    fig_v = px.bar(df_diario, x="Data", y="Receita",
+                   labels={"Receita": "R$", "Data": ""},
+                   color_discrete_sequence=["#7c3aed"])
+    fig_v.update_layout(height=220, margin=dict(l=0,r=0,t=10,b=0))
+    st.plotly_chart(fig_v, use_container_width=True)
+
+st.divider()
+
+# ── Ações sugeridas ───────────────────────────────────────────────────────────
+
+st.markdown("#### Ações recomendadas")
+
+em_risco_alto = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
+""").iloc[0]["n"]
+
+perdidos_alto = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
+""").iloc[0]["n"]
+
+segundo_pedido = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
+""").iloc[0]["n"]
+
+crush_promissor = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE personalidade_code = 'P3' AND recencia_code IN ('R1','R2')
+""").iloc[0]["n"]
+
+receita_em_risco = query("""
+    SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles
+    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
+""").iloc[0]["v"] or 0
+
+ACOES = [
+    {
+        "prioridade": "🔴 Alta",
+        "acao": "Campanha de reativação urgente",
+        "segmento": "Em risco (alto valor)",
+        "clientes": em_risco_alto,
+        "detalhe": f"R$ {receita_em_risco:,.0f} em receita histórica em jogo",
+        "canal": "Email + WhatsApp",
+        "bg": "#fff5f5",
+    },
+    {
+        "prioridade": "🔴 Alta",
+        "acao": "Win-back de perdidos VIP",
+        "segmento": "Perdidos alto valor",
+        "clientes": perdidos_alto,
+        "detalhe": "Oferta exclusiva de retorno — última tentativa",
+        "canal": "Email personalizado",
+        "bg": "#fff5f5",
+    },
+    {
+        "prioridade": "🟡 Média",
+        "acao": "Induzir 2ª compra",
+        "segmento": "Compraram 1x recentemente",
+        "clientes": segundo_pedido,
+        "detalhe": "Converter compradores únicos em recorrentes",
+        "canal": "Email + Meta Ads retargeting",
+        "bg": "#fffbea",
+    },
+    {
+        "prioridade": "🟡 Média",
+        "acao": "Converter crush promissor",
+        "segmento": "Crush promissor recente",
+        "clientes": crush_promissor,
+        "detalhe": "Clientes com potencial — empurrar para recorrência",
+        "canal": "Email sequência + remarketing",
+        "bg": "#fffbea",
+    },
+    {
+        "prioridade": "🟢 Contínua",
+        "acao": "Lookalike no Meta Ads",
+        "segmento": "VIPs + Lovers ativos",
+        "clientes": int(vips),
+        "detalhe": "Usar como seed para encontrar novos clientes parecidos",
+        "canal": "Meta Ads",
+        "bg": "#f0fff4",
+    },
+]
+
+cols = st.columns(len(ACOES))
+for col, a in zip(cols, ACOES):
+    col.markdown(f"""
+    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:190px;border:1px solid #e2e8f0">
+        <div style="font-size:11px;color:#888;margin-bottom:6px">{a['prioridade']}</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:4px">{a['acao']}</div>
+        <div style="font-size:12px;color:#555;margin-bottom:6px">{a['segmento']}</div>
+        <div style="font-size:20px;font-weight:700;color:#7c3aed">{a['clientes']:,.0f} <span style="font-size:11px;font-weight:400;color:#888">clientes</span></div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">{a['detalhe']}</div>
+        <div style="font-size:11px;color:#7c3aed;margin-top:4px">📣 {a['canal']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+br()
+st.divider()
 
 # ── Status + Personalidade ────────────────────────────────────────────────────
 
@@ -251,7 +435,6 @@ if csvs:
     df_exp = pd.DataFrame(rows)
     st.dataframe(df_exp, hide_index=True, use_container_width=True)
 
-    # Botão de download do CSV selecionado
     st.markdown("**Baixar audiência:**")
     escolha = st.selectbox("", [r["Arquivo"] for r in rows], label_visibility="collapsed")
     if escolha:
