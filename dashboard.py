@@ -628,6 +628,71 @@ with tab_a:
 
 st.divider()
 
+# ── Status da Relação ─────────────────────────────────────────────────────────
+
+section("Status da Relação", "Distribuição de todos os clientes pelos estágios do relacionamento.")
+
+_status_ord = {"S0":8,"S1":1,"S2":2,"S3":3,"S7":4,"S4":5,"S5":6,"S6":7}
+df_status_tbl = df_status.copy()
+df_status_tbl["_ord"] = df_status_tbl["code"].map(_status_ord)
+df_status_tbl = df_status_tbl.sort_values("_ord").drop(columns="_ord")
+df_status_tbl["Clientes"] = df_status_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
+df_status_tbl["%"] = df_status_tbl["pct"].apply(lambda x: f"{x:.1f}%")
+df_status_tbl["Receita total"] = df_status_tbl["receita"].apply(lambda x: f"R$ {float(x):,.0f}".replace(",","X").replace(".",",").replace("X",".") if x else "—")
+st.dataframe(
+    df_status_tbl[["code","label","Clientes","%","Receita total"]].rename(columns={"code":"Código","label":"Status"}),
+    hide_index=True, use_container_width=True
+)
+
+st.divider()
+
+# ── Valor da Relação ──────────────────────────────────────────────────────────
+
+section("Valor da Relação", "Segmentação por valor financeiro acumulado de cada cliente.")
+
+_valor_ord = {"V1":1,"V2":2,"V3":3,"V4":4,"V5":5}
+df_valor_tbl = df_valor.copy()
+df_valor_tbl["_ord"] = df_valor_tbl["code"].map(_valor_ord)
+df_valor_tbl = df_valor_tbl.sort_values("_ord").drop(columns="_ord")
+df_valor_tbl["Clientes"] = df_valor_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
+df_valor_tbl["Receita total"] = df_valor_tbl["receita"].apply(lambda x: f"R$ {float(x):,.0f}".replace(",","X").replace(".",",").replace("X",".") if x else "—")
+df_valor_tbl["Score médio"] = df_valor_tbl["score_med"].apply(lambda x: f"{float(x):.1f}" if x else "—")
+st.dataframe(
+    df_valor_tbl[["code","label","Clientes","Receita total","Score médio"]].rename(columns={"code":"Código","label":"Valor"}),
+    hide_index=True, use_container_width=True
+)
+
+st.divider()
+
+# ── Antiguidade da Base ───────────────────────────────────────────────────────
+
+section("Antiguidade da Base", "Há quanto tempo cada grupo de clientes está cadastrado.")
+
+_tenure_ord = {"T1":1,"T2":2,"T3":3,"T4":4,"T5":5,"T6":6,"T7":7,"T8":8}
+df_tenure_tbl = df_tenure.copy()
+df_tenure_tbl["_ord"] = df_tenure_tbl["code"].map(_tenure_ord)
+df_tenure_tbl = df_tenure_tbl.sort_values("_ord").drop(columns="_ord")
+df_tenure_tbl["Clientes"] = df_tenure_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
+df_tenure_tbl["%"] = df_tenure_tbl["pct"].apply(lambda x: f"{x:.1f}%")
+
+_tenure_range = {
+    "T1": "até 3 meses",
+    "T2": "3–6 meses",
+    "T3": "6–12 meses",
+    "T4": "1–2 anos",
+    "T5": "2–3 anos",
+    "T6": "3–4 anos",
+    "T7": "4–5 anos",
+    "T8": "5+ anos",
+}
+df_tenure_tbl["Período"] = df_tenure_tbl["code"].map(_tenure_range)
+st.dataframe(
+    df_tenure_tbl[["code","label","Período","Clientes","%"]].rename(columns={"code":"Código","label":"Fase"}),
+    hide_index=True, use_container_width=True
+)
+
+st.divider()
+
 # ── Ações sugeridas ───────────────────────────────────────────────────────────
 
 section("Ações recomendadas",
