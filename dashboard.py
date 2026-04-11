@@ -746,18 +746,26 @@ with c1:
     st.plotly_chart(fig, use_container_width=True)
 
 with c2:
-    section("Personalidade",
-            "Perfil comportamental baseado em frequência e valor gasto:\n💎 Sugar Lover: frequente e gasta muito (R$2.500+)\n🔥 Lover: frequente mas ticket menor\n💘 Crush Promissor: gasta bem mas ainda pouco frequente\n🙂 Date Casual: compras esparsas e valor baixo\n👻 Ghost: nunca comprou")
-    cores_p = {"P1":"#7c3aed","P2":"#ef4444","P3":"#f59e0b","P4":"#3b82f6","P5":"#94a3b8"}
-    fig2 = px.bar(
-        df_pessoa, x="n", y="label", orientation="h",
-        color="code", color_discrete_map=cores_p,
-        text=df_pessoa.apply(lambda r: f"{r['n']:,.0f} ({r['pct']}%)", axis=1),
-        labels={"n":"Clientes","label":""},
-    )
-    fig2.update_traces(textposition="outside")
-    fig2.update_layout(showlegend=False, height=300, margin=dict(l=0,r=60,t=10,b=0))
-    st.plotly_chart(fig2, use_container_width=True)
+    section("Valor da Relação",
+            "Segmentação por valor total gasto:\n💎 VIP: R$5.000+ E ticket > R$300\n🔥 Alto valor: R$2.500–5.000\n🍷 Médio valor: R$1.000–2.500\n🙂 Baixo valor: até R$1.000\n👀 Observador: nunca comprou")
+    cores_v = {"V1":"#7c3aed","V2":"#ef4444","V3":"#f59e0b","V4":"#3b82f6","V5":"#94a3b8"}
+    cv1, cv2 = st.columns([1, 1])
+    with cv1:
+        df_v = df_valor.copy()
+        df_v["Receita"]     = df_v["receita"].apply(lambda x: f"R$ {float(x):,.0f}")
+        df_v["Score médio"] = df_v["score_med"]
+        st.dataframe(
+            df_v[["label","n","Receita","Score médio"]].rename(columns={"label":"Segmento","n":"Clientes"}),
+            hide_index=True, use_container_width=True
+        )
+    with cv2:
+        fig_pizza = px.pie(
+            df_valor, values="receita", names="label",
+            color="code", color_discrete_map=cores_v, hole=0.5,
+        )
+        fig_pizza.update_layout(height=280, margin=dict(l=0,r=0,t=10,b=0), showlegend=False)
+        fig_pizza.update_traces(textinfo="percent", textposition="outside")
+        st.plotly_chart(fig_pizza, use_container_width=True)
 
 # ── Antiguidade da base ───────────────────────────────────────────────────────
 
@@ -778,32 +786,6 @@ fig_t = px.bar(
 fig_t.update_traces(textposition="outside")
 fig_t.update_layout(showlegend=False, height=320, margin=dict(l=0,r=80,t=10,b=0))
 st.plotly_chart(fig_t, use_container_width=True)
-
-# ── Valor da Relação ──────────────────────────────────────────────────────────
-
-section("Valor da Relação",
-        "Segmentação por valor total gasto na marca:\n💎 VIP: R$ 5.000+\n🔥 Alto valor: R$ 2.500–5.000\n🍷 Médio valor: R$ 1.000–2.500\n🙂 Baixo valor: até R$ 500\n👀 Observador: nunca comprou")
-
-c1, c2 = st.columns([1, 2])
-
-with c1:
-    df_v = df_valor.copy()
-    df_v["Receita"] = df_v["receita"].apply(lambda x: f"R$ {x:,.0f}")
-    df_v["Score médio"] = df_v["score_med"]
-    st.dataframe(
-        df_v[["label","n","Receita","Score médio"]].rename(columns={"label":"Segmento","n":"Clientes"}),
-        hide_index=True, use_container_width=True
-    )
-
-with c2:
-    fig3 = px.pie(
-        df_valor, values="receita", names="label",
-        color="code",
-        color_discrete_map={"V1":"#7c3aed","V2":"#ef4444","V3":"#f59e0b","V4":"#3b82f6","V5":"#94a3b8"},
-        hole=0.5,
-    )
-    fig3.update_layout(height=250, margin=dict(l=0,r=0,t=10,b=0), showlegend=True)
-    st.plotly_chart(fig3, use_container_width=True)
 
 st.divider()
 
