@@ -529,7 +529,13 @@ periodo_sel = st.selectbox("Período", list(PERIODO_NOVOS.keys()), index=3, key=
 data_ini_novos = PERIODO_NOVOS[periodo_sel]
 
 df_novos = query(f"""
-    WITH freq AS (
+    WITH primeira_compra AS (
+        SELECT customer_id, MIN(date_created::timestamp) AS primeira_compra
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+        GROUP BY customer_id
+    ),
+    freq AS (
         SELECT customer_id,
                CASE WHEN COUNT(*) >= 2
                     THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created::timestamp) - MIN(date_created::timestamp))) / 86400.0 / NULLIF(COUNT(*)-1,0))
@@ -540,16 +546,17 @@ df_novos = query(f"""
     )
     SELECT c.woo_id, c.first_name, c.last_name,
            c.registration_date,
+           pc.primeira_compra,
            p.frequencia_label, p.status_label, p.personalidade_label, p.valor_label,
            p.total_spent, p.avg_ticket, p.orders_count, p.last_order_date,
            p.categoria_preferida, p.tamanho_preferido,
            f.avg_days_between
     FROM customers c
     JOIN crm_profiles p ON p.customer_id = c.woo_id
+    JOIN primeira_compra pc ON pc.customer_id = c.woo_id
     LEFT JOIN freq f ON f.customer_id = c.woo_id
-    WHERE c.registration_date::timestamp >= {data_ini_novos}
-      AND p.orders_count >= 1
-    ORDER BY c.registration_date DESC
+    WHERE pc.primeira_compra >= {data_ini_novos}
+    ORDER BY pc.primeira_compra DESC
 """)
 
 if df_novos.empty:
@@ -558,7 +565,7 @@ else:
     st.metric(f"Novos Crushes — {periodo_sel}", len(df_novos))
     br()
     df_novos["Cliente"]       = df_novos["first_name"] + " " + df_novos["last_name"]
-    df_novos["Cadastro"]      = pd.to_datetime(df_novos["registration_date"]).dt.strftime("%d/%m/%Y")
+    df_novos["1ª compra"]     = pd.to_datetime(df_novos["primeira_compra"]).dt.strftime("%d/%m/%Y")
     df_novos["Últ. pedido"]   = pd.to_datetime(df_novos["last_order_date"]).dt.strftime("%d/%m/%Y")
     df_novos["Pedidos"]       = df_novos["orders_count"]
     df_novos["Ticket médio"]  = df_novos["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
@@ -570,7 +577,7 @@ else:
     df_novos["Tamanho"]       = df_novos["tamanho_preferido"].fillna("—")
 
     st.dataframe(
-        df_novos[["Cliente","Cadastro","Últ. pedido","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
+        df_novos[["Cliente","1ª compra","Últ. pedido","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
         hide_index=True, use_container_width=True
     )
 
