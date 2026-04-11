@@ -242,7 +242,7 @@ section("Vendas por período",
         "Receita de pedidos pagos (exclui cancelados e reembolsados). Comparação sempre com o mesmo número de dias do período anterior.")
 
 df_vendas = query("""
-    SELECT date_created, total
+    SELECT date_created, total, customer_id
     FROM orders
     WHERE status NOT IN ('cancelled','refunded','failed')
 """)
@@ -257,18 +257,27 @@ if not df_vendas.empty:
     ini_mes = hoje.replace(day=1)
     ini_mes_ant = (ini_mes - timedelta(days=1)).replace(day=1)
     fim_mes_ant_equiv = ini_mes_ant + timedelta(days=(hoje - ini_mes).days)
+    ini_ano = hoje.replace(month=1, day=1)
 
     def filtrar(df, d_ini, d_fim):
         mask = (df["date_created"].dt.date >= d_ini) & (df["date_created"].dt.date <= d_fim)
-        return df[mask]["total"].sum()
+        return df[mask]
 
-    v_hoje    = filtrar(df_vendas, hoje, hoje)
-    v_ontem   = filtrar(df_vendas, ontem, ontem)
-    v_semana  = filtrar(df_vendas, ini_semana, hoje)
-    v_sem_ant = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)
-    v_mes     = filtrar(df_vendas, ini_mes, hoje)
-    v_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
+    def ticket_medio(df, d_ini, d_fim):
+        sub = filtrar(df, d_ini, d_fim)
+        return sub["total"].mean() if len(sub) else 0
+
+    v_hoje    = filtrar(df_vendas, hoje, hoje)["total"].sum()
+    v_ontem   = filtrar(df_vendas, ontem, ontem)["total"].sum()
+    v_semana  = filtrar(df_vendas, ini_semana, hoje)["total"].sum()
+    v_sem_ant = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)["total"].sum()
+    v_mes     = filtrar(df_vendas, ini_mes, hoje)["total"].sum()
+    v_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)["total"].sum()
     label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
+
+    t_ontem = ticket_medio(df_vendas, ontem, ontem)
+    t_mes   = ticket_medio(df_vendas, ini_mes, hoje)
+    t_ano   = ticket_medio(df_vendas, ini_ano, hoje)
 
     def delta_str(atual, anterior):
         if anterior == 0:
@@ -293,6 +302,29 @@ if not df_vendas.empty:
             {("<div style='font-size:12px;margin-top:4px'>" + d + "</div>") if d else ""}
         </div>
         """, unsafe_allow_html=True)
+
+    br()
+
+    # Tickets médios + novos/recompra MTD
+    tk1, tk2, tk3, tk4, tk5 = st.columns(5)
+
+    tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}" if t_ontem else "—")
+    tk2.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"   if t_mes   else "—")
+    tk3.metric("Ticket médio ano",    f"R$ {t_ano:,.0f}"   if t_ano   else "—")
+
+    # Novos clientes MTD = 1ª compra no mês atual
+    df_mes = filtrar(df_vendas, ini_mes, hoje)
+    primeiras = df_vendas.groupby("customer_id")["date_created"].min().reset_index()
+    primeiras.columns = ["customer_id", "primeira_compra"]
+    novos_mtd = primeiras[primeiras["primeira_compra"].dt.date >= ini_mes].shape[0]
+
+    # Recompra MTD = clientes que compraram este mês mas já tinham comprado antes
+    cids_mes = set(df_mes["customer_id"].unique())
+    cids_antes = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes - timedelta(days=1))["customer_id"].unique())
+    recompra_mtd = len(cids_mes & cids_antes)
+
+    tk4.metric("Novos clientes MTD",  novos_mtd)
+    tk5.metric("Recompras MTD",       recompra_mtd)
 
     br()
 
@@ -341,7 +373,8 @@ df_hist = query("""
            h.personalidade_code, h.prev_pessoa,
            h.score, h.prev_score,
            p.first_name, p.last_name,
-           p.orders_count, p.avg_ticket, p.total_spent, p.last_order_date,
+           p.orders_count, p.avg_ticket, p.total_spent,
+           p.last_order_date AS ultima_compra_data,
            p.categoria_preferida, p.tamanho_preferido,
            c.registration_date,
            f.avg_days_between,
@@ -396,12 +429,13 @@ else:
     df_hist["Score Δ"]         = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
     df_hist["Pedidos"]         = df_hist["orders_count"]
     df_hist["Ticket médio"]    = df_hist["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Últ. compra"]     = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Penúlt. compra"]  = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Últ. valor"]      = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Penúlt. valor"]   = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df_hist["Cadastro"]        = pd.to_datetime(df_hist["registration_date"]).dt.strftime("%d/%m/%Y")
     df_hist["Frequência"]      = df_hist["avg_days_between"].apply(freq_icon)
     df_hist["Categoria"]       = df_hist["categoria_preferida"].fillna("—")
     df_hist["Tamanho"]         = df_hist["tamanho_preferido"].fillna("—")
+    df_hist["Últ. compra"]     = pd.to_datetime(df_hist["ultima_compra_data"], errors="coerce").dt.strftime("%d/%m/%Y")
     df_hist["Data"]            = pd.to_datetime(df_hist["synced_at"]).dt.strftime("%d/%m %H:%M")
 
     melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
@@ -414,7 +448,7 @@ else:
 
     br()
     st.dataframe(
-        df_hist[["Movimento","Cliente","Cadastro","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. compra","Penúlt. compra","Data"]],
+        df_hist[["Movimento","Cliente","Cadastro","Últ. compra","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. valor","Penúlt. valor","Data"]],
         hide_index=True, use_container_width=True
     )
 
@@ -423,9 +457,18 @@ st.divider()
 # ── Novos Crushes ─────────────────────────────────────────────────────────────
 
 section("Novos Crushes 💘",
-        "Clientes cadastrados nos últimos 30 dias que já fizeram pelo menos uma compra. São os novos relacionamentos a cultivar.")
+        "Clientes cadastrados no período selecionado que já fizeram pelo menos uma compra.")
 
-df_novos = query("""
+PERIODO_NOVOS = {
+    "Hoje":         "DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Sao_Paulo')",
+    "Ontem":        "(DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Sao_Paulo') - INTERVAL '1 day')",
+    "Esta semana":  "DATE_TRUNC('week', NOW() AT TIME ZONE 'America/Sao_Paulo')",
+    "Este mês":     "DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo')",
+}
+periodo_sel = st.selectbox("Período", list(PERIODO_NOVOS.keys()), index=3, key="sel_novos")
+data_ini_novos = PERIODO_NOVOS[periodo_sel]
+
+df_novos = query(f"""
     WITH freq AS (
         SELECT customer_id,
                CASE WHEN COUNT(*) >= 2
@@ -435,7 +478,7 @@ df_novos = query("""
         WHERE status NOT IN ('cancelled','refunded','failed')
         GROUP BY customer_id
     )
-    SELECT c.woo_id, c.first_name, c.last_name, c.email,
+    SELECT c.woo_id, c.first_name, c.last_name,
            c.registration_date,
            p.status_label, p.personalidade_label, p.valor_label,
            p.total_spent, p.avg_ticket, p.orders_count, p.last_order_date,
@@ -444,15 +487,15 @@ df_novos = query("""
     FROM customers c
     JOIN crm_profiles p ON p.customer_id = c.woo_id
     LEFT JOIN freq f ON f.customer_id = c.woo_id
-    WHERE c.registration_date::timestamp >= NOW() - INTERVAL '30 days'
+    WHERE c.registration_date::timestamp >= {data_ini_novos}
       AND p.orders_count >= 1
     ORDER BY c.registration_date DESC
 """)
 
 if df_novos.empty:
-    st.info("Nenhum novo cliente com compra nos últimos 30 dias.")
+    st.info(f"Nenhum novo cliente com compra em '{periodo_sel}'.")
 else:
-    st.metric("Novos Crushes (30 dias)", len(df_novos))
+    st.metric(f"Novos Crushes — {periodo_sel}", len(df_novos))
     br()
     df_novos["Cliente"]       = df_novos["first_name"] + " " + df_novos["last_name"]
     df_novos["Cadastro"]      = pd.to_datetime(df_novos["registration_date"]).dt.strftime("%d/%m/%Y")
