@@ -633,9 +633,9 @@ st.divider()
 section("Status × Valor da Relação", "Cruzamento entre o estágio do relacionamento e o valor financeiro de cada cliente.")
 
 df_sv = query("""
-    SELECT status_code, status_label, valor_code, COUNT(*) n
+    SELECT status_code, valor_code, COUNT(*) n, COALESCE(SUM(total_spent), 0) receita
     FROM crm_profiles
-    GROUP BY status_code, status_label, valor_code
+    GROUP BY status_code, valor_code
 """)
 
 _status_ord  = {"S1":1,"S2":2,"S3":3,"S7":4,"S4":5,"S5":6,"S6":7,"S0":8}
@@ -652,13 +652,37 @@ _valor_labels = {
     "V5":"👀 Observador",
 }
 
-pivot = df_sv.pivot_table(index="status_code", columns="valor_code", values="n", aggfunc="sum", fill_value=0)
-# garante todas as colunas de valor mesmo se alguma estiver vazia
+def _fmt_cell(n, receita):
+    if n == 0:
+        return "—"
+    r = float(receita)
+    if r >= 1_000_000:
+        rs = f"R$ {r/1_000_000:.1f}M"
+    elif r >= 1_000:
+        rs = f"R$ {r/1_000:.0f}k"
+    else:
+        rs = f"R$ {r:.0f}"
+    return f"{int(n)} · {rs}"
+
+pivot_n = df_sv.pivot_table(index="status_code", columns="valor_code", values="n",      aggfunc="sum", fill_value=0)
+pivot_r = df_sv.pivot_table(index="status_code", columns="valor_code", values="receita", aggfunc="sum", fill_value=0)
+
 for vc in _valor_cols:
-    if vc not in pivot.columns:
-        pivot[vc] = 0
-pivot = pivot[_valor_cols]
-pivot["Total"] = pivot.sum(axis=1)
+    if vc not in pivot_n.columns: pivot_n[vc] = 0
+    if vc not in pivot_r.columns: pivot_r[vc] = 0
+
+pivot_n = pivot_n[_valor_cols]
+pivot_r = pivot_r[_valor_cols]
+
+# monta pivot formatado
+pivot = pivot_n.copy().astype(object)
+for vc in _valor_cols:
+    pivot[vc] = [_fmt_cell(pivot_n.loc[sc, vc], pivot_r.loc[sc, vc]) for sc in pivot_n.index]
+
+total_n = pivot_n.sum(axis=1)
+total_r = pivot_r.sum(axis=1)
+pivot["Total"] = [_fmt_cell(total_n[sc], total_r[sc]) for sc in pivot_n.index]
+
 pivot = pivot.reset_index()
 pivot["_ord"] = pivot["status_code"].map(_status_ord)
 pivot = pivot.sort_values("_ord").drop(columns="_ord")
