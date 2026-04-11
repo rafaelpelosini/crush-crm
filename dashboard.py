@@ -315,66 +315,12 @@ if not df_vendas.empty:
 
     br()
 
-    # Tickets médios + novos crushes/recorrentes MTD com comparativo
     t_semana = ticket_medio(df_vendas, ini_semana, hoje)
 
-    df_mes     = filtrar(df_vendas, ini_mes, hoje)
-    df_mes_ant_full = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
-
-    primeiras = df_vendas.groupby("customer_id")["date_created"].min().reset_index()
-    primeiras.columns = ["customer_id", "primeira_compra"]
-
-    # MTD atual
-    novos_mtd    = primeiras[primeiras["primeira_compra"].dt.date >= ini_mes].shape[0]
-    cids_mes     = set(df_mes["customer_id"].unique())
-    cids_antes   = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes - timedelta(days=1))["customer_id"].unique())
-    recompra_mtd = len(cids_mes & cids_antes)
-
-    # Mesmo período mês anterior
-    novos_mes_ant    = primeiras[
-        (primeiras["primeira_compra"].dt.date >= ini_mes_ant) &
-        (primeiras["primeira_compra"].dt.date <= fim_mes_ant_equiv)
-    ].shape[0]
-    cids_mes_ant     = set(df_mes_ant_full["customer_id"].unique())
-    cids_antes_ant   = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes_ant - timedelta(days=1))["customer_id"].unique())
-    recompra_mes_ant = len(cids_mes_ant & cids_antes_ant)
-
-    # Receita novos crushes e crushes antigos no mês
-    cids_novos_mes     = set(primeiras[primeiras["primeira_compra"].dt.date >= ini_mes]["customer_id"])
-    cids_novos_mes_ant = set(primeiras[
-        (primeiras["primeira_compra"].dt.date >= ini_mes_ant) &
-        (primeiras["primeira_compra"].dt.date <= fim_mes_ant_equiv)
-    ]["customer_id"])
-
-    rec_novos_mes     = filtrar(df_vendas, ini_mes, hoje)[
-        df_vendas["customer_id"].isin(cids_novos_mes)]["total"].sum()
-    rec_novos_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)[
-        df_vendas["customer_id"].isin(cids_novos_mes_ant)]["total"].sum()
-
-    cids_antigos_mes     = cids_mes - cids_novos_mes
-    cids_antigos_mes_ant = cids_mes_ant - cids_novos_mes_ant
-    rec_antigos_mes     = filtrar(df_vendas, ini_mes, hoje)[
-        df_vendas["customer_id"].isin(cids_antigos_mes)]["total"].sum()
-    rec_antigos_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)[
-        df_vendas["customer_id"].isin(cids_antigos_mes_ant)]["total"].sum()
-
-    nome_mes     = ini_mes.strftime("%B").capitalize()
-    nome_mes_ant = ini_mes_ant.strftime("%B").capitalize()
-
-    tk1, tk2, tk3, tk4, tk5 = st.columns(5)
+    tk1, tk2, tk3 = st.columns(3)
     tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—")
     tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—")
     tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—")
-    tk4.metric(
-        f"💘 Novos Crushes — {nome_mes}",
-        f"{novos_mtd} | R$ {rec_novos_mes/1000:.1f}k",
-        delta=f"{novos_mtd - novos_mes_ant:+d} | R$ {(rec_novos_mes - rec_novos_mes_ant)/1000:+.1f}k vs {nome_mes_ant}",
-    )
-    tk5.metric(
-        f"💍 Crushes Antigos — {nome_mes}",
-        f"{recompra_mtd} | R$ {rec_antigos_mes/1000:.1f}k",
-        delta=f"{recompra_mtd - recompra_mes_ant:+d} | R$ {(rec_antigos_mes - rec_antigos_mes_ant)/1000:+.1f}k vs {nome_mes_ant}",
-    )
 
     br()
 
@@ -514,72 +460,163 @@ else:
 
 st.divider()
 
-# ── Novos Crushes ─────────────────────────────────────────────────────────────
+# ── Novos Crushes & Crushes Antigos ──────────────────────────────────────────
 
-section("Novos Crushes 💘",
-        "Clientes cadastrados no período selecionado que já fizeram pelo menos uma compra.")
+section("Novos Crushes & Crushes Antigos",
+        "Novos Crushes: 1ª compra no período selecionado.\nCrushes Antigos: clientes com histórico que voltaram a comprar no período.")
 
-PERIODO_NOVOS = {
-    "Hoje":         "DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Sao_Paulo')",
-    "Ontem":        "(DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Sao_Paulo') - INTERVAL '1 day')",
-    "Esta semana":  "DATE_TRUNC('week', NOW() AT TIME ZONE 'America/Sao_Paulo')",
-    "Este mês":     "DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo')",
+_PERIODOS_NC = {
+    "Hoje":        (hoje,       hoje,             hoje-timedelta(7),          hoje-timedelta(7),          "vs mesma semana passada"),
+    "Ontem":       (hoje-timedelta(1), hoje-timedelta(1), hoje-timedelta(8),  hoje-timedelta(8),          "vs mesma semana passada"),
+    "Esta semana": (ini_semana, hoje,             ini_semana-timedelta(7),    hoje-timedelta(7),          "vs semana passada"),
+    "Este mês":    (ini_mes,    hoje,             ini_mes_ant,                fim_mes_ant_equiv,          f"vs {ini_mes_ant.strftime('%b')} MTD"),
 }
-periodo_sel = st.selectbox("Período", list(PERIODO_NOVOS.keys()), index=3, key="sel_novos")
-data_ini_novos = PERIODO_NOVOS[periodo_sel]
 
-df_novos = query(f"""
-    WITH primeira_compra AS (
-        SELECT customer_id, MIN(date_created::timestamp) AS primeira_compra
-        FROM orders
-        WHERE status NOT IN ('cancelled','refunded','failed')
-        GROUP BY customer_id
-    ),
+periodo_nc = st.selectbox("Período", list(_PERIODOS_NC.keys()), index=3, key="sel_nc")
+d_ini, d_fim, d_ref_ini, d_ref_fim, label_ref = _PERIODOS_NC[periodo_nc]
+si, sf = str(d_ini), str(d_fim)
+ri, rf = str(d_ref_ini), str(d_ref_fim)
+
+_freq_cte = """
     freq AS (
         SELECT customer_id,
                CASE WHEN COUNT(*) >= 2
                     THEN ROUND(EXTRACT(EPOCH FROM (MAX(date_created::timestamp) - MIN(date_created::timestamp))) / 86400.0 / NULLIF(COUNT(*)-1,0))
                     ELSE NULL END AS avg_days_between
-        FROM orders
-        WHERE status NOT IN ('cancelled','refunded','failed')
+        FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
         GROUP BY customer_id
-    )
-    SELECT c.woo_id, c.first_name, c.last_name,
-           c.registration_date,
-           pc.primeira_compra,
-           p.frequencia_label, p.status_label, p.personalidade_label, p.valor_label,
-           p.total_spent, p.avg_ticket, p.orders_count, p.last_order_date,
-           p.categoria_preferida, p.tamanho_preferido,
-           f.avg_days_between
+    )"""
+
+_select = """
+    c.first_name, c.last_name,
+    p.frequencia_label, p.status_label, p.valor_label,
+    p.avg_ticket, p.orders_count, p.last_order_date,
+    p.categoria_preferida, p.tamanho_preferido,
+    f.avg_days_between,
+    ROUND(rp.rec_periodo::numeric, 0) AS rec_periodo"""
+
+_joins = """
     FROM customers c
     JOIN crm_profiles p ON p.customer_id = c.woo_id
-    JOIN primeira_compra pc ON pc.customer_id = c.woo_id
     LEFT JOIN freq f ON f.customer_id = c.woo_id
-    WHERE pc.primeira_compra >= {data_ini_novos}
+    JOIN rec_per rp ON rp.customer_id = c.woo_id"""
+
+df_novos_nc = query(f"""
+    WITH primeira AS (
+        SELECT customer_id, MIN(date_created) AS primeira_compra
+        FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+        GROUP BY customer_id
+    ),
+    rec_per AS (
+        SELECT customer_id, SUM(total) AS rec_periodo
+        FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+          AND date_created BETWEEN '{si}' AND '{sf}'
+        GROUP BY customer_id
+    ),
+    {_freq_cte}
+    SELECT {_select}, pc.primeira_compra
+    {_joins}
+    JOIN primeira pc ON pc.customer_id = c.woo_id
+    WHERE pc.primeira_compra BETWEEN '{si}' AND '{sf}'
     ORDER BY pc.primeira_compra DESC
 """)
 
-if df_novos.empty:
-    st.info(f"Nenhum novo cliente com compra em '{periodo_sel}'.")
-else:
-    st.metric(f"Novos Crushes — {periodo_sel}", len(df_novos))
-    br()
-    df_novos["Cliente"]       = df_novos["first_name"] + " " + df_novos["last_name"]
-    df_novos["1ª compra"]     = pd.to_datetime(df_novos["primeira_compra"]).dt.strftime("%d/%m/%Y")
-    df_novos["Últ. pedido"]   = pd.to_datetime(df_novos["last_order_date"]).dt.strftime("%d/%m/%Y")
-    df_novos["Pedidos"]       = df_novos["orders_count"]
-    df_novos["Ticket médio"]  = df_novos["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_novos["Frequência"]    = df_novos["avg_days_between"].apply(freq_icon)
-    df_novos["Status"]        = df_novos["frequencia_label"] + " — " + df_novos["status_label"]
-    df_novos["Personalidade"] = df_novos["personalidade_label"]
-    df_novos["Valor"]         = df_novos["valor_label"]
-    df_novos["Categoria"]     = df_novos["categoria_preferida"].fillna("—")
-    df_novos["Tamanho"]       = df_novos["tamanho_preferido"].fillna("—")
+df_antigos_nc = query(f"""
+    WITH had_before AS (
+        SELECT DISTINCT customer_id FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+          AND date_created < '{si}'
+    ),
+    rec_per AS (
+        SELECT customer_id, SUM(total) AS rec_periodo
+        FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+          AND date_created BETWEEN '{si}' AND '{sf}'
+        GROUP BY customer_id
+    ),
+    {_freq_cte}
+    SELECT {_select}
+    {_joins}
+    JOIN had_before hb ON hb.customer_id = c.woo_id
+    ORDER BY rp.rec_periodo DESC
+""")
 
-    st.dataframe(
-        df_novos[["Cliente","1ª compra","Últ. pedido","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","Status","Personalidade","Valor"]],
-        hide_index=True, use_container_width=True
-    )
+# Totais de referência (para delta)
+_ref_novos = query(f"""
+    SELECT COUNT(*) n, COALESCE(SUM(total), 0) receita
+    FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+      AND date_created BETWEEN '{ri}' AND '{rf}'
+      AND customer_id IN (
+        SELECT customer_id FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+        GROUP BY customer_id HAVING MIN(date_created) BETWEEN '{ri}' AND '{rf}'
+      )
+""").iloc[0]
+
+_ref_antigos = query(f"""
+    SELECT COUNT(DISTINCT customer_id) n, COALESCE(SUM(total), 0) receita
+    FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+      AND date_created BETWEEN '{ri}' AND '{rf}'
+      AND customer_id IN (
+        SELECT DISTINCT customer_id FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed') AND date_created < '{ri}'
+      )
+""").iloc[0]
+
+novos_n   = len(df_novos_nc)
+novos_rec = float(df_novos_nc["rec_periodo"].sum()) if not df_novos_nc.empty else 0
+ant_n     = len(df_antigos_nc)
+ant_rec   = float(df_antigos_nc["rec_periodo"].sum()) if not df_antigos_nc.empty else 0
+ref_nov_n, ref_nov_rec = int(_ref_novos["n"]), float(_ref_novos["receita"])
+ref_ant_n, ref_ant_rec = int(_ref_antigos["n"]), float(_ref_antigos["receita"])
+
+mc1, mc2 = st.columns(2)
+mc1.metric(
+    "💘 Novos Crushes",
+    f"{novos_n} clientes  |  R$ {novos_rec/1000:.1f}k",
+    delta=f"{novos_n - ref_nov_n:+d} clientes  |  R$ {(novos_rec - ref_nov_rec)/1000:+.1f}k  {label_ref}",
+)
+mc2.metric(
+    "💍 Crushes Antigos",
+    f"{ant_n} clientes  |  R$ {ant_rec/1000:.1f}k",
+    delta=f"{ant_n - ref_ant_n:+d} clientes  |  R$ {(ant_rec - ref_ant_rec)/1000:+.1f}k  {label_ref}",
+)
+
+br()
+
+def _fmt_nc(df):
+    df = df.copy()
+    df["Cliente"]        = df["first_name"] + " " + df["last_name"]
+    df["Receita período"]= df["rec_periodo"].apply(lambda x: f"R$ {float(x):,.0f}" if x else "—")
+    df["Ticket médio"]   = df["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df["Frequência"]     = df["avg_days_between"].apply(freq_icon)
+    df["Status"]         = df["frequencia_label"] + " — " + df["status_label"]
+    df["Valor"]          = df["valor_label"]
+    df["Categoria"]      = df["categoria_preferida"].fillna("—")
+    df["Tamanho"]        = df["tamanho_preferido"].fillna("—")
+    df["Últ. pedido"]    = pd.to_datetime(df["last_order_date"]).dt.strftime("%d/%m/%Y")
+    return df
+
+tab_n, tab_a = st.tabs(["💘 Novos Crushes", "💍 Crushes Antigos"])
+
+with tab_n:
+    if df_novos_nc.empty:
+        st.info("Nenhum Novo Crush no período.")
+    else:
+        df_fmt = _fmt_nc(df_novos_nc)
+        df_fmt["1ª compra"] = pd.to_datetime(df_fmt["primeira_compra"]).dt.strftime("%d/%m/%Y")
+        st.dataframe(
+            df_fmt[["Cliente","1ª compra","Últ. pedido","orders_count","Receita período","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
+            hide_index=True, use_container_width=True
+        )
+
+with tab_a:
+    if df_antigos_nc.empty:
+        st.info("Nenhum Crush Antigo no período.")
+    else:
+        df_fmt = _fmt_nc(df_antigos_nc)
+        st.dataframe(
+            df_fmt[["Cliente","Últ. pedido","orders_count","Receita período","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
+            hide_index=True, use_container_width=True
+        )
 
 st.divider()
 
