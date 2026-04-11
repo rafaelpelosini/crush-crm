@@ -490,7 +490,7 @@ _freq_cte = """
 _select = """
     c.first_name, c.last_name,
     p.frequencia_label, p.status_label, p.valor_label,
-    p.avg_ticket, p.orders_count, p.last_order_date,
+    p.avg_ticket, p.orders_count, p.last_order_date, p.registration_date,
     p.categoria_preferida, p.tamanho_preferido,
     f.avg_days_between,
     ROUND(rp.rec_periodo::numeric, 0) AS rec_periodo"""
@@ -610,9 +610,9 @@ with tab_n:
         st.info("Nenhum Novo Crush no período.")
     else:
         df_fmt = _fmt_nc(df_novos_nc)
-        df_fmt["1ª compra"] = pd.to_datetime(df_fmt["primeira_compra"]).dt.strftime("%d/%m/%Y")
+        df_fmt["Cadastro"] = pd.to_datetime(df_fmt["registration_date"]).dt.strftime("%d/%m/%Y")
         st.dataframe(
-            df_fmt[["Cliente","1ª compra","Últ. pedido","orders_count","Receita período","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
+            df_fmt[["Cliente","Cadastro","Últ. pedido","orders_count","Receita período","Ticket médio","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
             hide_index=True, use_container_width=True
         )
 
