@@ -218,27 +218,11 @@ receita_novos_c   = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles 
 
 k1, k2, k3, k4, k5 = st.columns(5)
 
-card(k1, "💍", "Fiéis",         f"{fieis:,.0f}",
-     tooltip="Recorrentes recentes — 2+ pedidos nos últimos 90–180 dias.",
-     sub=f"R$ {receita_fieis/1000:.0f}k receita histórica", color="#f0fff4")
-
-card(k2, "💘", "Novos Crushes", f"{novos:,.0f}",
-     tooltip="1ª compra nos últimos 90 dias. Janela crítica para converter em recorrentes.",
-     sub=f"R$ {receita_novos_c/1000:.0f}k receita histórica", color="#fdf4ff")
-
-card(k3, "💎", "VIPs",          f"{vips:,.0f}",
-     tooltip="Total > R$5.000 E ticket médio > R$300. Grupo de elite — tratamento prioritário.",
-     sub=f"R$ {receita_vip/1000:.0f}k receita histórica", color="#fffbea")
-
-card(k4, "🧊", "Esfriando",     f"{esfriando_n:,.0f}",
-     tooltip="2+ compras mas sem comprar há 181–270 dias. Vale acionar antes de gelar.",
-     sub=f"R$ {receita_esfriando/1000:.0f}k em risco", color="#fff5f5")
-
-card(k5, "👻", "Ghosting",      f"{ghosting:,.0f}",
-     tooltip="Compraram 1 vez e sumiram há 6+ meses. Maior segmento — potencial de reativação.",
-     sub=f"{ghosting/total*100:.0f}% da base", color="#f8fafc")
-
-br()
+k1.metric("💍 Fiéis",        f"{fieis:,.0f} clientes",  f"R$ {receita_fieis/1000:.0f}k receita histórica",  delta_color="off")
+k2.metric("💘 Novos Crushes",f"{novos:,.0f} clientes",  f"R$ {receita_novos_c/1000:.0f}k receita histórica", delta_color="off")
+k3.metric("💎 VIPs",         f"{vips:,.0f} clientes",   f"R$ {receita_vip/1000:.0f}k receita histórica",     delta_color="off")
+k4.metric("🧊 Esfriando",    f"{esfriando_n:,.0f} clientes", f"R$ {receita_esfriando/1000:.0f}k em risco",  delta_color="off")
+k5.metric("👻 Ghosting",     f"{ghosting:,.0f} clientes", f"{ghosting/total*100:.0f}% da base",              delta_color="off")
 
 # ── Vendas: dia / semana / mês ────────────────────────────────────────────────
 
@@ -296,31 +280,29 @@ if not df_vendas.empty:
     v_ontem_ref    = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].sum()
     v_hoje_ref     = filtrar(df_vendas, hoje_sem_ant,  hoje_sem_ant )["total"].sum()
 
+    t_semana = ticket_medio(df_vendas, ini_semana, hoje)
+
     v1, v2, v3, v4 = st.columns(4)
 
-    for col, titulo, atual, anterior, label_ref in [
-        (v1, "Ontem",       v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"),
-        (v2, "Hoje",        v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"),
-        (v3, "Esta semana", v_semana, v_sem_ant,   "vs semana passada"),
-        (v4, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant, label_mes_ant),
-    ]:
-        d = delta_str(atual, anterior)
-        col.markdown(f"""
-        <div style="background:#f8fafc;border-radius:12px;padding:20px 24px;height:110px;border:1px solid #e2e8f0">
-            <div style="font-size:13px;color:#888;margin-bottom:4px">{titulo}</div>
-            <div style="font-size:26px;font-weight:700">R$ {atual:,.0f}</div>
-            {("<div style='font-size:12px;margin-top:4px'>" + d + f" ({label_ref})" + "</div>") if d else ""}
-        </div>
-        """, unsafe_allow_html=True)
+    def _delta_pct(atual, anterior, label_ref):
+        if anterior == 0:
+            return None
+        pct = (atual - anterior) / anterior * 100
+        sinal = "+" if pct >= 0 else ""
+        return f"{sinal}{pct:.1f}%  {label_ref}"
+
+    v1.metric("Ontem",       f"R$ {v_ontem:,.0f}",  _delta_pct(v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"))
+    v2.metric("Hoje",        f"R$ {v_hoje:,.0f}",   _delta_pct(v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"))
+    v3.metric("Esta semana", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant,   "vs semana passada"))
+    v4.metric(f"Este mês (1–{hoje.day}/{hoje.month})", f"R$ {v_mes:,.0f}", _delta_pct(v_mes, v_mes_ant, label_mes_ant))
 
     br()
 
-    t_semana = ticket_medio(df_vendas, ini_semana, hoje)
-
-    tk1, tk2, tk3 = st.columns(3)
+    tk1, tk2, tk3, tk4 = st.columns(4)
     tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—")
     tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—")
     tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—")
+    tk4.metric("Ticket médio ano",    f"R$ {t_ano:,.0f}"    if t_ano    else "—")
 
     br()
 
