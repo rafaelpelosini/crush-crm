@@ -205,24 +205,25 @@ st.divider()
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 
-fieis    = df_status[df_status.code == "S1"]["n"].sum() if not df_status.empty else 0
-novos    = df_status[df_status.code == "S2"]["n"].sum() if not df_status.empty else 0
+fieis       = df_status[df_status.code == "S1"]["n"].sum() if not df_status.empty else 0
+novos       = df_status[df_status.code == "S2"]["n"].sum() if not df_status.empty else 0
 esfriando_n = df_status[df_status.code == "S4"]["n"].sum() if not df_status.empty else 0
-ghosting = df_status[df_status.code == "S6"]["n"].sum() if not df_status.empty else 0
-vips     = df_valor[df_valor.code == "V1"]["n"].sum() if not df_valor.empty else 0
+ghosting    = df_status[df_status.code == "S6"]["n"].sum() if not df_status.empty else 0
+vips        = df_valor[df_valor.code == "V1"]["n"].sum() if not df_valor.empty else 0
+ativos_n    = fieis + novos
 
 receita_vip       = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE valor_code='V1'").iloc[0]["v"] or 0
 receita_esfriando = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S4'").iloc[0]["v"] or 0
 receita_fieis     = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S1'").iloc[0]["v"] or 0
 receita_novos_c   = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S2'").iloc[0]["v"] or 0
 
-k1, k2, k3, k4, k5 = st.columns(5)
-
-k1.metric("💍 Fiéis",        f"{fieis:,.0f} clientes",  f"R$ {receita_fieis/1000:.0f}k receita histórica",  delta_color="off")
-k2.metric("💘 Novos Crushes",f"{novos:,.0f} clientes",  f"R$ {receita_novos_c/1000:.0f}k receita histórica", delta_color="off")
-k3.metric("💎 VIPs",         f"{vips:,.0f} clientes",   f"R$ {receita_vip/1000:.0f}k receita histórica",     delta_color="off")
-k4.metric("🧊 Esfriando",    f"{esfriando_n:,.0f} clientes", f"R$ {receita_esfriando/1000:.0f}k em risco",  delta_color="off")
-k5.metric("👻 Ghosting",     f"{ghosting:,.0f} clientes", f"{ghosting/total*100:.0f}% da base",              delta_color="off")
+# Linha 1 — Base
+b1, b2, b3, b4, b5 = st.columns(5)
+b1.metric("🗂️ Base total",    f"{int(total):,}".replace(",",".") + " clientes", f"{ativos_n:,.0f} ativos (Fiéis + Novos Crushes)", delta_color="off")
+b2.metric("💍 Fiéis",         f"{fieis:,.0f} clientes",  f"R$ {receita_fieis/1000:.0f}k receita histórica",  delta_color="off")
+b3.metric("💎 VIPs",          f"{vips:,.0f} clientes",   f"R$ {receita_vip/1000:.0f}k receita histórica",     delta_color="off")
+b4.metric("🧊 Esfriando",     f"{esfriando_n:,.0f} clientes", f"R$ {receita_esfriando/1000:.0f}k em risco",  delta_color="off")
+b5.metric("👻 Ghosting",      f"{ghosting:,.0f} clientes", f"{ghosting/total*100:.0f}% da base",              delta_color="off")
 
 # ── Vendas: dia / semana / mês ────────────────────────────────────────────────
 
@@ -230,7 +231,7 @@ section("Vendas por período",
         "Receita de pedidos pagos (exclui cancelados e reembolsados). Comparação sempre com o mesmo número de dias do período anterior.")
 
 df_vendas = query("""
-    SELECT date_created, total, customer_id
+    SELECT date_created, total, customer_id, woo_id
     FROM orders
     WHERE status NOT IN ('cancelled','refunded','failed')
 """)
@@ -251,38 +252,24 @@ if not df_vendas.empty:
         mask = (df["date_created"].dt.date >= d_ini) & (df["date_created"].dt.date <= d_fim)
         return df[mask]
 
-    def ticket_medio(df, d_ini, d_fim):
+    def stats(df, d_ini, d_fim):
         sub = filtrar(df, d_ini, d_fim)
-        return sub["total"].mean() if len(sub) else 0
+        return sub["total"].sum(), sub["customer_id"].nunique(), len(sub), sub["total"].mean() if len(sub) else 0
 
-    v_hoje    = filtrar(df_vendas, hoje, hoje)["total"].sum()
-    v_ontem   = filtrar(df_vendas, ontem, ontem)["total"].sum()
-    v_semana  = filtrar(df_vendas, ini_semana, hoje)["total"].sum()
-    v_sem_ant = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)["total"].sum()
-    v_mes     = filtrar(df_vendas, ini_mes, hoje)["total"].sum()
-    v_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)["total"].sum()
+    ontem_sem_ant = ontem - timedelta(weeks=1)
+    hoje_sem_ant  = hoje  - timedelta(weeks=1)
+    ini_ano       = hoje.replace(month=1, day=1)
     label_mes_ant = f"vs {ini_mes_ant.strftime('%d/%m')}–{fim_mes_ant_equiv.strftime('%d/%m/%y')}"
 
-    t_ontem = ticket_medio(df_vendas, ontem, ontem)
-    t_mes   = ticket_medio(df_vendas, ini_mes, hoje)
-    t_ano   = ticket_medio(df_vendas, ini_ano, hoje)
-
-    def delta_str(atual, anterior):
-        if anterior == 0:
-            return None
-        pct = (atual - anterior) / anterior * 100
-        sinal = "▲" if pct >= 0 else "▼"
-        cor = "green" if pct >= 0 else "red"
-        return f"<span style='color:{cor}'>{sinal} {abs(pct):.1f}% vs período anterior</span>"
-
-    ontem_sem_ant  = ontem  - timedelta(weeks=1)
-    hoje_sem_ant   = hoje   - timedelta(weeks=1)
-    v_ontem_ref    = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].sum()
-    v_hoje_ref     = filtrar(df_vendas, hoje_sem_ant,  hoje_sem_ant )["total"].sum()
-
-    t_semana = ticket_medio(df_vendas, ini_semana, hoje)
-
-    v1, v2, v3, v4 = st.columns(4)
+    v_ontem,  c_ontem,  p_ontem,  t_ontem  = stats(df_vendas, ontem,        ontem)
+    v_hoje,   c_hoje,   p_hoje,   t_hoje   = stats(df_vendas, hoje,         hoje)
+    v_semana, c_semana, p_semana, t_semana = stats(df_vendas, ini_semana,   hoje)
+    v_mes,    c_mes,    p_mes,    t_mes    = stats(df_vendas, ini_mes,      hoje)
+    v_ontem_ref = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].sum()
+    v_hoje_ref  = filtrar(df_vendas, hoje_sem_ant,  hoje_sem_ant)["total"].sum()
+    v_sem_ant   = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)["total"].sum()
+    v_mes_ant   = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)["total"].sum()
+    _,_,_,t_ano = stats(df_vendas, ini_ano, hoje)
 
     def _delta_pct(atual, anterior, label_ref):
         if anterior == 0:
@@ -291,10 +278,24 @@ if not df_vendas.empty:
         sinal = "+" if pct >= 0 else ""
         return f"{sinal}{pct:.1f}%  {label_ref}"
 
+    def _sub_vendas(clientes, pedidos):
+        return f"{clientes} clientes · {pedidos} pedidos"
+
+    v1, v2, v3, v4 = st.columns(4)
     v1.metric("Ontem",       f"R$ {v_ontem:,.0f}",  _delta_pct(v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"))
     v2.metric("Hoje",        f"R$ {v_hoje:,.0f}",   _delta_pct(v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"))
     v3.metric("Esta semana", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant,   "vs semana passada"))
     v4.metric(f"Este mês (1–{hoje.day}/{hoje.month})", f"R$ {v_mes:,.0f}", _delta_pct(v_mes, v_mes_ant, label_mes_ant))
+
+    st.markdown(
+        f"<div style='display:flex;gap:0;margin-top:-8px'>"
+        + "".join([
+            f"<div style='flex:1;font-size:12px;color:#aaa'>{_sub_vendas(c,p)}</div>"
+            for c, p in [(c_ontem,p_ontem),(c_hoje,p_hoje),(c_semana,p_semana),(c_mes,p_mes)]
+        ])
+        + "</div>",
+        unsafe_allow_html=True
+    )
 
     br()
 
