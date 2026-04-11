@@ -133,12 +133,22 @@ def classify_personalidade(f_code: str, m_code: str) -> tuple[str, str]:
 
 # ─── Valor da Relação ─────────────────────────────────────────────────────────
 
-def classify_valor(m_code: str, k_code: str) -> tuple[str, str]:
+def classify_valor(m_code: str, k_code: str, f_code: str = "F0", avg_ticket: float = 0) -> tuple[str, str]:
     """
-    VIP (V1) exige total > R$5.000 E ticket médio > R$300 (K4+).
-    Clientes com alto total mas ticket baixo (compras frequentes de itens baratos)
-    são classificados como Alto valor — perfil diferente de um VIP real de moda.
+    F1: classificado pelo ticket da única compra (não pelo total acumulado).
+    F2+: VIP (V1) exige total > R$5.000 E ticket médio > R$300 (K4+).
     """
+    f = int(f_code[1])
+
+    # F1 — única compra: usa valor do ticket diretamente
+    if f == 1:
+        t = float(avg_ticket or 0)
+        if t <= 250:  return "V4", "🌸 Chegou de boa"
+        if t <= 500:  return "V3", "💘 Chegou bem"
+        if t <= 750:  return "V2", "✨ Chegou forte"
+        if t <= 1000: return "V1", "🔥 Chegou muito bem"
+        return               "V1", "💎 Chegou arrasando"
+
     m = int(m_code[1])
     k = int(k_code[1])
     if m == 0:          return "V5", "👀 Observador"
@@ -185,7 +195,7 @@ def classify_customer(orders_count, total_spent, avg_ticket, registration_date, 
     k_code, k_label = classify_ticket(avg_ticket)
     s_code, s_label = classify_status(f_code, r_code)
     p_code, p_label = classify_personalidade(f_code, m_code)
-    v_code, v_label = classify_valor(m_code, k_code)
+    v_code, v_label = classify_valor(m_code, k_code, f_code, avg_ticket)
     score           = calculate_score(f_code, r_code, t_code, m_code)
     score_label     = classify_score_label(score)
 
