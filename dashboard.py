@@ -669,19 +669,26 @@ pivot.columns = ["Status"] + [_valor_labels[v].split("/")[0].strip() for v in _v
 
 st.dataframe(pivot, hide_index=True, use_container_width=True)
 
-st.caption(
-    "**Colunas (Valor da Relação):** "
-    "💎 VIP / Chegou arrasando — total > R$5k com ticket alto (F2+) ou 1ª compra > R$1.001 (F1)  |  "
-    "🔥 Alto / Chegou muito bem — R$2.500–5k (F2+) ou R$751–1.000 (F1)  |  "
-    "🍷 Médio / Chegou bem — R$1.000–2.500 (F2+) ou R$251–500 (F1)  |  "
-    "🙂 Baixo / Chegou de boa — até R$1.000 (F2+) ou até R$250 (F1)  |  "
-    "👀 Observador — sem compras  \n"
-    "**Linhas (Status da Relação):** "
-    "💍 Fiel — recorrente ativa  |  💘 Novo Crush — 1ª compra recente  |  "
-    "🌤 Morno — 1 compra, 3–6 meses  |  ⏸️ Em Pausa — pausou 3–9 meses  |  "
-    "🧊 Esfriando — sumindo há 6–9 meses  |  ❄️ Gelando — sumindo há 9–12 meses  |  "
-    "👻 Ghosting — 1 compra e sumiu  |  👀 Só olhando — nunca comprou"
-)
+st.markdown("""
+<div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
+<b>Colunas — Valor da Relação</b><br>
+💎 <b>VIP / Chegou arrasando</b> — total > R$5k + ticket alto (recorrentes) ou 1ª compra > R$1.001 &nbsp;·&nbsp;
+🔥 <b>Alto / Chegou muito bem</b> — R$2.500–5k (recorrentes) ou R$751–1.000 (1ª compra) &nbsp;·&nbsp;
+🍷 <b>Médio / Chegou bem</b> — R$1.000–2.500 (recorrentes) ou R$251–500 (1ª compra) &nbsp;·&nbsp;
+🙂 <b>Baixo / Chegou de boa</b> — até R$1.000 (recorrentes) ou até R$250 (1ª compra) &nbsp;·&nbsp;
+👀 <b>Observador</b> — nunca comprou
+<br><br>
+<b>Linhas — Status da Relação</b><br>
+💍 <b>Fiel</b> — recorrente ativa &nbsp;·&nbsp;
+💘 <b>Novo Crush</b> — 1ª compra nos últimos 90 dias &nbsp;·&nbsp;
+🌤 <b>Morno</b> — 1 compra há 3–6 meses &nbsp;·&nbsp;
+⏸️ <b>Em Pausa</b> — 2+ compras, parou há 3–9 meses &nbsp;·&nbsp;
+🧊 <b>Esfriando</b> — sumindo há 6–9 meses &nbsp;·&nbsp;
+❄️ <b>Gelando</b> — sumindo há 9–12 meses &nbsp;·&nbsp;
+👻 <b>Ghosting</b> — 1 compra e sumiu &nbsp;·&nbsp;
+👀 <b>Só olhando</b> — nunca comprou
+</div>
+""", unsafe_allow_html=True)
 
 st.divider()
 
