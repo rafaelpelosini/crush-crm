@@ -18,6 +18,20 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 import db
+
+BRASILIA = timezone(timedelta(hours=-3))
+
+def _to_brt_date(dt_str: str) -> str:
+    """Converte timestamp UTC do WooCommerce para data em horário de Brasília."""
+    if not dt_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(BRASILIA).strftime("%Y-%m-%d")
+    except Exception:
+        return dt_str[:10]
 import engine
 import export
 from woo import WooClient
@@ -105,7 +119,7 @@ def run_sync(full: bool = False):
             "woo_id":         o["id"],
             "customer_id":    o.get("customer_id", 0),
             "customer_email": o.get("customer_email", ""),
-            "date_created":   o.get("date_created", "")[:10],
+            "date_created":   _to_brt_date(o.get("date_created", "")),
             "total":          float(o.get("total", 0)),
             "status":         o.get("status", ""),
         })

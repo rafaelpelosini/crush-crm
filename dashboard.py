@@ -242,14 +242,13 @@ section("Vendas por período",
         "Receita de pedidos pagos (exclui cancelados e reembolsados). Comparação sempre com o mesmo número de dias do período anterior.")
 
 df_vendas = query("""
-    SELECT (date_created::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')::date AS date_created,
-           total, customer_id
+    SELECT date_created, total, customer_id
     FROM orders
     WHERE status NOT IN ('cancelled','refunded','failed')
 """)
 
 if not df_vendas.empty:
-    df_vendas["date_created"] = pd.to_datetime(df_vendas["date_created"]).dt.normalize()
+    df_vendas["date_created"] = pd.to_datetime(df_vendas["date_created"])
     hoje = now_brt().date()
     ontem = hoje - timedelta(days=1)
     ini_semana = hoje - timedelta(days=hoje.weekday())
