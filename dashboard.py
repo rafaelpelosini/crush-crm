@@ -533,10 +533,16 @@ df_antigos_nc = query(f"""
           AND date_created BETWEEN '{si}' AND '{sf}'
         GROUP BY customer_id
     ),
+    last_order_val AS (
+        SELECT DISTINCT ON (customer_id) customer_id, total AS last_order_value
+        FROM orders WHERE status NOT IN ('cancelled','refunded','failed')
+        ORDER BY customer_id, date_created DESC
+    ),
     {_freq_cte}
-    SELECT {_select}
+    SELECT {_select}, lov.last_order_value
     {_joins}
     JOIN had_before hb ON hb.customer_id = c.woo_id
+    LEFT JOIN last_order_val lov ON lov.customer_id = c.woo_id
     ORDER BY rp.rec_periodo DESC
 """)
 
@@ -586,6 +592,8 @@ def _fmt_nc(df):
     df = df.copy()
     df["Cliente"]        = df["first_name"] + " " + df["last_name"]
     df["Receita período"]= df["rec_periodo"].apply(lambda x: f"R$ {float(x):,.0f}" if x else "—")
+    if "last_order_value" in df.columns:
+        df["Últ. pedido R$"] = df["last_order_value"].apply(lambda x: f"R$ {float(x):,.0f}" if x else "—")
     df["Ticket médio"]   = df["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df["Frequência"]     = df["avg_days_between"].apply(freq_icon)
     df["Status"]         = df["frequencia_label"] + " — " + df["status_label"]
@@ -614,7 +622,7 @@ with tab_a:
     else:
         df_fmt = _fmt_nc(df_antigos_nc)
         st.dataframe(
-            df_fmt[["Cliente","Últ. pedido","orders_count","Receita período","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
+            df_fmt[["Cliente","Últ. pedido","orders_count","Últ. pedido R$","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
             hide_index=True, use_container_width=True
         )
 
