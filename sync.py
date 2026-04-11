@@ -13,7 +13,7 @@ Agende para rodar diariamente:
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 
@@ -231,11 +231,84 @@ def print_snapshot():
     print()
 
 
+def run_reclassify():
+    """Reclassifica todos os clientes usando dados já existentes no banco — sem chamar a API."""
+    start = time.time()
+    now   = datetime.now(timezone.utc).isoformat()
+
+    print(f"\n{'='*55}")
+    print(f"  Crush CRM — reclassificação local")
+    print(f"  {now}")
+    print(f"{'='*55}\n")
+
+    db.init()
+
+    print("▶ Carregando clientes do banco...")
+    customer_rows = db.fetch_all("SELECT woo_id, email, first_name, last_name, registration_date FROM customers")
+    customer_map  = {r["woo_id"]: r for r in customer_rows}
+    print(f"  {len(customer_map)} clientes carregados\n")
+
+    print("▶ Calculando métricas e classificando clientes...")
+    with db.connect() as conn:
+        stats       = db.fetch_order_stats(conn)
+        preferences = db.fetch_customer_preferences(conn)
+
+    profile_rows = []
+    for woo_id, cdata in customer_map.items():
+        s = stats.get(woo_id, {})
+        registration_date = cdata.get("registration_date", "")
+        if not registration_date:
+            continue
+
+        orders_count    = s.get("orders_count", 0)
+        total_spent     = float(s.get("total_spent") or 0)
+        avg_ticket      = float(s.get("avg_ticket") or 0)
+        last_order_date = s.get("last_order_date")
+
+        crm = engine.classify_customer(
+            orders_count, total_spent, avg_ticket,
+            registration_date, last_order_date
+        )
+
+        prefs = preferences.get(woo_id, {})
+        profile_rows.append({
+            "customer_id":        woo_id,
+            "email":              cdata.get("email", ""),
+            "first_name":         cdata.get("first_name", ""),
+            "last_name":          cdata.get("last_name", ""),
+            "orders_count":       orders_count,
+            "total_spent":        total_spent,
+            "avg_ticket":         avg_ticket,
+            "last_order_date":    last_order_date,
+            "registration_date":  registration_date,
+            "classified_at":      now,
+            "categoria_preferida": prefs.get("categoria_preferida"),
+            "tamanho_preferido":   prefs.get("tamanho_preferido"),
+            **crm,
+        })
+
+    with db.connect() as conn:
+        db.upsert_crm_profiles_batch(conn, profile_rows)
+        db.save_profile_history(conn, profile_rows, now)
+
+    print(f"  {len(profile_rows)} perfis CRM atualizados\n")
+
+    print("▶ Exportando audiências...\n")
+    export.export_all()
+
+    duration = time.time() - start
+    print(f"\n{'='*55}")
+    print(f"  Reclassificação concluída em {duration:.1f}s")
+    print(f"{'='*55}\n")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if "--snapshot" in args:
         print_snapshot()
     elif "--export" in args:
         export.export_all()
+    elif "--reclassify" in args:
+        run_reclassify()
     else:
         run_sync(full="--full" in args)

@@ -19,12 +19,12 @@ def _days(dt):
 
 def classify_frequency(orders_count: int) -> tuple[str, str]:
     n = int(orders_count or 0)
-    if n == 0:  return "F0", "🚫 Sem match"
+    if n == 0:  return "F0", "🚫 Sem Match"
     if n == 1:  return "F1", "💘 Date"
     if n <= 3:  return "F2", "😉 Casinho"
-    if n <= 9:  return "F3", "🔥 Amante"
-    if n <= 14: return "F4", "❤️ Namoro"
-    return              "F5", "💞 Paixão"
+    if n <= 6:  return "F3", "🔥 Amante"
+    if n <= 10: return "F4", "❤️ Namoro"
+    return              "F5", "💞 Obcecada"
 
 
 # ─── Recência ─────────────────────────────────────────────────────────────────
@@ -90,26 +90,28 @@ def classify_status(f_code: str, r_code: str) -> tuple[str, str]:
     f = int(f_code[1])
     r = int(r_code[1])
 
+    # Nunca comprou
     if f == 0:
-        return "S5", "👻 Perdido"
+        return "S0", "👀 Só olhando"
 
-    if r == 0:  # sem compra mas cadastrado
-        return "S5", "👻 Perdido"
+    # F1 — primeira compra
+    if f == 1:
+        if r == 1: return "S2", "💘 Novo Crush"
+        if r == 2: return "S3", "🌤 Morno"
+        return             "S6", "👻 Ghosting"   # r >= 3: sumiu após uma compra
 
-    if r == 1:
-        return ("S1", "✅ Ativo") if f >= 3 else ("S2", "⚠️ Oscilando")
+    # F2 — 2-3 compras
+    if f == 2:
+        if r == 1: return "S1", "💍 Fiel"
+        if r == 2: return "S7", "⏸️ Em Pausa"
+        if r == 3: return "S4", "🧊 Esfriando"
+        return             "S5", "❄️ Gelando"    # r >= 4
 
-    if r == 2:
-        return ("S3", "🧊 Esfriando") if f >= 3 else ("S2", "⚠️ Oscilando")
-
-    if r == 3:
-        return ("S3", "🧊 Esfriando") if f >= 2 else ("S5", "👻 Perdido")
-
-    if r == 4:
-        return ("S4", "🚨 Em risco") if f >= 2 else ("S5", "👻 Perdido")
-
-    # r == 5
-    return ("S4", "🚨 Em risco") if f >= 3 else ("S5", "👻 Perdido")
+    # F3+ — compradora frequente (4+ pedidos)
+    if r <= 2: return "S1", "💍 Fiel"
+    if r == 3: return "S7", "⏸️ Em Pausa"
+    if r == 4: return "S4", "🧊 Esfriando"
+    return             "S5", "❄️ Gelando"        # r == 5
 
 
 # ─── Personalidade ────────────────────────────────────────────────────────────

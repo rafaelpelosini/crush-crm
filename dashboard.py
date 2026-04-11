@@ -362,9 +362,18 @@ st.divider()
 section("Movimentações recentes",
         "Clientes que mudaram de Status, Personalidade ou Valor desde o sync anterior. Boas notícias = clientes que melhoraram. Alertas = clientes que pioraram.")
 
-STATUS_ORDEM = {"S1": 1, "S2": 2, "S3": 3, "S4": 4, "S5": 5}
+STATUS_ORDEM = {"S0": 8, "S1": 1, "S2": 2, "S3": 3, "S7": 4, "S4": 5, "S5": 6, "S6": 7}
 
-STATUS_LABEL  = {"S1":"✅ Ativa","S2":"⚠️ Oscilando","S3":"🧊 Esfriando","S4":"🚨 Em risco","S5":"👻 Perdida"}
+STATUS_LABEL  = {
+    "S0": "👀 Só olhando",
+    "S1": "💍 Fiel",
+    "S2": "💘 Novo Crush",
+    "S3": "🌤 Morno",
+    "S7": "⏸️ Em Pausa",
+    "S4": "🧊 Esfriando",
+    "S5": "❄️ Gelando",
+    "S6": "👻 Ghosting",
+}
 PESSOA_LABEL  = {"P1":"💎 Sugar Lover","P2":"🔥 Lover","P3":"💘 Crush Promissor","P4":"🙂 Date Casual","P5":"👻 Ghost"}
 
 df_hist = query("""
@@ -389,6 +398,7 @@ df_hist = query("""
            h.personalidade_code, h.prev_pessoa,
            h.score, h.prev_score,
            p.first_name, p.last_name,
+           p.frequencia_label,
            p.orders_count, p.avg_ticket, p.total_spent,
            p.last_order_date AS ultima_compra_data,
            p.categoria_preferida, p.tamanho_preferido,
@@ -440,8 +450,8 @@ else:
 
     df_hist["Movimento"]       = df_hist.apply(classify_movimento, axis=1)
     df_hist["Cliente"]         = df_hist["first_name"] + " " + df_hist["last_name"]
-    df_hist["De"]              = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"]) + " / " + df_hist["prev_pessoa"].map(PESSOA_LABEL).fillna(df_hist["prev_pessoa"])
-    df_hist["Para"]            = df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"]) + " / " + df_hist["personalidade_code"].map(PESSOA_LABEL).fillna(df_hist["personalidade_code"])
+    df_hist["De"]              = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"])
+    df_hist["Para"]            = df_hist["frequencia_label"] + " — " + df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"])
     df_hist["Score Δ"]         = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
     df_hist["Pedidos"]         = df_hist["orders_count"]
     df_hist["Ticket médio"]    = df_hist["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
@@ -496,7 +506,7 @@ df_novos = query(f"""
     )
     SELECT c.woo_id, c.first_name, c.last_name,
            c.registration_date,
-           p.status_label, p.personalidade_label, p.valor_label,
+           p.frequencia_label, p.status_label, p.personalidade_label, p.valor_label,
            p.total_spent, p.avg_ticket, p.orders_count, p.last_order_date,
            p.categoria_preferida, p.tamanho_preferido,
            f.avg_days_between
@@ -519,7 +529,7 @@ else:
     df_novos["Pedidos"]       = df_novos["orders_count"]
     df_novos["Ticket médio"]  = df_novos["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
     df_novos["Frequência"]    = df_novos["avg_days_between"].apply(freq_icon)
-    df_novos["Status"]        = df_novos["status_label"]
+    df_novos["Status"]        = df_novos["frequencia_label"] + " — " + df_novos["status_label"]
     df_novos["Personalidade"] = df_novos["personalidade_label"]
     df_novos["Valor"]         = df_novos["valor_label"]
     df_novos["Categoria"]     = df_novos["categoria_preferida"].fillna("—")
