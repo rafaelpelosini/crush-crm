@@ -628,38 +628,59 @@ with tab_a:
 
 st.divider()
 
-# ── Status da Relação ─────────────────────────────────────────────────────────
+# ── Status × Valor da Relação ─────────────────────────────────────────────────
 
-section("Status da Relação", "Distribuição de todos os clientes pelos estágios do relacionamento.")
+section("Status × Valor da Relação", "Cruzamento entre o estágio do relacionamento e o valor financeiro de cada cliente.")
 
-_status_ord = {"S0":8,"S1":1,"S2":2,"S3":3,"S7":4,"S4":5,"S5":6,"S6":7}
-df_status_tbl = df_status.copy()
-df_status_tbl["_ord"] = df_status_tbl["code"].map(_status_ord)
-df_status_tbl = df_status_tbl.sort_values("_ord").drop(columns="_ord")
-df_status_tbl["Clientes"] = df_status_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
-df_status_tbl["%"] = df_status_tbl["pct"].apply(lambda x: f"{x:.1f}%")
-df_status_tbl["Receita total"] = df_status_tbl["receita"].apply(lambda x: f"R$ {float(x):,.0f}".replace(",","X").replace(".",",").replace("X",".") if x else "—")
-st.dataframe(
-    df_status_tbl[["code","label","Clientes","%","Receita total"]].rename(columns={"code":"Código","label":"Status"}),
-    hide_index=True, use_container_width=True
-)
+df_sv = query("""
+    SELECT status_code, status_label, valor_code, COUNT(*) n
+    FROM crm_profiles
+    GROUP BY status_code, status_label, valor_code
+""")
 
-st.divider()
+_status_ord  = {"S1":1,"S2":2,"S3":3,"S7":4,"S4":5,"S5":6,"S6":7,"S0":8}
+_status_labels = {
+    "S1":"💍 Fiel","S2":"💘 Novo Crush","S3":"🌤 Morno","S7":"⏸️ Em Pausa",
+    "S4":"🧊 Esfriando","S5":"❄️ Gelando","S6":"👻 Ghosting","S0":"👀 Só olhando",
+}
+_valor_cols  = ["V1","V2","V3","V4","V5"]
+_valor_labels = {
+    "V1":"💎 VIP / Chegou arrasando",
+    "V2":"🔥 Alto / Chegou muito bem",
+    "V3":"🍷 Médio / Chegou bem",
+    "V4":"🙂 Baixo / Chegou de boa",
+    "V5":"👀 Observador",
+}
 
-# ── Valor da Relação ──────────────────────────────────────────────────────────
+pivot = df_sv.pivot_table(index="status_code", columns="valor_code", values="n", aggfunc="sum", fill_value=0)
+# garante todas as colunas de valor mesmo se alguma estiver vazia
+for vc in _valor_cols:
+    if vc not in pivot.columns:
+        pivot[vc] = 0
+pivot = pivot[_valor_cols]
+pivot["Total"] = pivot.sum(axis=1)
+pivot = pivot.reset_index()
+pivot["_ord"] = pivot["status_code"].map(_status_ord)
+pivot = pivot.sort_values("_ord").drop(columns="_ord")
+pivot["Status"] = pivot["status_code"].map(_status_labels)
+cols_ordem = ["Status"] + _valor_cols + ["Total"]
+pivot = pivot[cols_ordem]
+pivot.columns = ["Status"] + [_valor_labels[v].split("/")[0].strip() for v in _valor_cols] + ["Total"]
 
-section("Valor da Relação", "Segmentação por valor financeiro acumulado de cada cliente.")
+st.dataframe(pivot, hide_index=True, use_container_width=True)
 
-_valor_ord = {"V1":1,"V2":2,"V3":3,"V4":4,"V5":5}
-df_valor_tbl = df_valor.copy()
-df_valor_tbl["_ord"] = df_valor_tbl["code"].map(_valor_ord)
-df_valor_tbl = df_valor_tbl.sort_values("_ord").drop(columns="_ord")
-df_valor_tbl["Clientes"] = df_valor_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
-df_valor_tbl["Receita total"] = df_valor_tbl["receita"].apply(lambda x: f"R$ {float(x):,.0f}".replace(",","X").replace(".",",").replace("X",".") if x else "—")
-df_valor_tbl["Score médio"] = df_valor_tbl["score_med"].apply(lambda x: f"{float(x):.1f}" if x else "—")
-st.dataframe(
-    df_valor_tbl[["code","label","Clientes","Receita total","Score médio"]].rename(columns={"code":"Código","label":"Valor"}),
-    hide_index=True, use_container_width=True
+st.caption(
+    "**Colunas (Valor da Relação):** "
+    "💎 VIP / Chegou arrasando — total > R$5k com ticket alto (F2+) ou 1ª compra > R$1.001 (F1)  |  "
+    "🔥 Alto / Chegou muito bem — R$2.500–5k (F2+) ou R$751–1.000 (F1)  |  "
+    "🍷 Médio / Chegou bem — R$1.000–2.500 (F2+) ou R$251–500 (F1)  |  "
+    "🙂 Baixo / Chegou de boa — até R$1.000 (F2+) ou até R$250 (F1)  |  "
+    "👀 Observador — sem compras  \n"
+    "**Linhas (Status da Relação):** "
+    "💍 Fiel — recorrente ativa  |  💘 Novo Crush — 1ª compra recente  |  "
+    "🌤 Morno — 1 compra, 3–6 meses  |  ⏸️ Em Pausa — pausou 3–9 meses  |  "
+    "🧊 Esfriando — sumindo há 6–9 meses  |  ❄️ Gelando — sumindo há 9–12 meses  |  "
+    "👻 Ghosting — 1 compra e sumiu  |  👀 Só olhando — nunca comprou"
 )
 
 st.divider()
