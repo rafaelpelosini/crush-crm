@@ -287,12 +287,13 @@ if not df_vendas.empty:
         cor = "green" if pct >= 0 else "red"
         return f"<span style='color:{cor}'>{sinal} {abs(pct):.1f}% vs período anterior</span>"
 
-    v1, v2, v3 = st.columns(3)
+    v1, v2, v3, v4 = st.columns(4)
 
-    for col, titulo, atual, anterior, label_ant in [
-        (v1, "Hoje",        v_hoje,   v_ontem,   "vs ontem"),
-        (v2, "Esta semana", v_semana, v_sem_ant, "vs semana passada"),
-        (v3, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant, label_mes_ant),
+    for col, titulo, atual, anterior in [
+        (v1, "Ontem",       v_ontem,  filtrar(df_vendas, ontem - timedelta(days=1), ontem - timedelta(days=1))["total"].sum()),
+        (v2, "Hoje",        v_hoje,   v_ontem),
+        (v3, "Esta semana", v_semana, v_sem_ant),
+        (v4, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant),
     ]:
         d = delta_str(atual, anterior)
         col.markdown(f"""
@@ -305,26 +306,36 @@ if not df_vendas.empty:
 
     br()
 
-    # Tickets médios + novos/recompra MTD
-    tk1, tk2, tk3, tk4, tk5 = st.columns(5)
+    # Tickets médios + novos crushes/recorrentes MTD com comparativo
+    t_semana = ticket_medio(df_vendas, ini_semana, hoje)
 
-    tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}" if t_ontem else "—")
-    tk2.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"   if t_mes   else "—")
-    tk3.metric("Ticket médio ano",    f"R$ {t_ano:,.0f}"   if t_ano   else "—")
+    df_mes     = filtrar(df_vendas, ini_mes, hoje)
+    df_mes_ant_full = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
 
-    # Novos clientes MTD = 1ª compra no mês atual
-    df_mes = filtrar(df_vendas, ini_mes, hoje)
     primeiras = df_vendas.groupby("customer_id")["date_created"].min().reset_index()
     primeiras.columns = ["customer_id", "primeira_compra"]
-    novos_mtd = primeiras[primeiras["primeira_compra"].dt.date >= ini_mes].shape[0]
 
-    # Recompra MTD = clientes que compraram este mês mas já tinham comprado antes
-    cids_mes = set(df_mes["customer_id"].unique())
-    cids_antes = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes - timedelta(days=1))["customer_id"].unique())
+    # MTD atual
+    novos_mtd    = primeiras[primeiras["primeira_compra"].dt.date >= ini_mes].shape[0]
+    cids_mes     = set(df_mes["customer_id"].unique())
+    cids_antes   = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes - timedelta(days=1))["customer_id"].unique())
     recompra_mtd = len(cids_mes & cids_antes)
 
-    tk4.metric("Novos clientes MTD",  novos_mtd)
-    tk5.metric("Recompras MTD",       recompra_mtd)
+    # Mesmo período mês anterior
+    novos_mes_ant    = primeiras[
+        (primeiras["primeira_compra"].dt.date >= ini_mes_ant) &
+        (primeiras["primeira_compra"].dt.date <= fim_mes_ant_equiv)
+    ].shape[0]
+    cids_mes_ant     = set(df_mes_ant_full["customer_id"].unique())
+    cids_antes_ant   = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes_ant - timedelta(days=1))["customer_id"].unique())
+    recompra_mes_ant = len(cids_mes_ant & cids_antes_ant)
+
+    tk1, tk2, tk3, tk4, tk5 = st.columns(5)
+    tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—")
+    tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—")
+    tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—")
+    tk4.metric("Novos Crushes MTD",   novos_mtd,    delta=int(novos_mtd - novos_mes_ant))
+    tk5.metric("Crushes recorrentes MTD", recompra_mtd, delta=int(recompra_mtd - recompra_mes_ant))
 
     br()
 
