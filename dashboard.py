@@ -205,36 +205,38 @@ st.divider()
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+fieis    = df_status[df_status.code == "S1"]["n"].sum() if not df_status.empty else 0
+novos    = df_status[df_status.code == "S2"]["n"].sum() if not df_status.empty else 0
+esfriando_n = df_status[df_status.code == "S4"]["n"].sum() if not df_status.empty else 0
+ghosting = df_status[df_status.code == "S6"]["n"].sum() if not df_status.empty else 0
+vips     = df_valor[df_valor.code == "V1"]["n"].sum() if not df_valor.empty else 0
 
-fieis      = df_status[df_status.code == "S1"]["n"].sum() if not df_status.empty else 0
-novos      = df_status[df_status.code == "S2"]["n"].sum() if not df_status.empty else 0
-ativos     = fieis + novos
-em_risco   = df_status[df_status.code == "S4"]["n"].sum() if not df_status.empty else 0
-ghosting   = df_status[df_status.code == "S6"]["n"].sum() if not df_status.empty else 0
-vips       = df_valor[df_valor.code == "V1"]["n"].sum() if not df_valor.empty else 0
+receita_vip       = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE valor_code='V1'").iloc[0]["v"] or 0
+receita_esfriando = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S4'").iloc[0]["v"] or 0
+receita_fieis     = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S1'").iloc[0]["v"] or 0
+receita_novos_c   = query("SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles WHERE status_code='S2'").iloc[0]["v"] or 0
 
-card(k1, "👥", "Total de clientes", f"{total:,.0f}",
-     tooltip="Total de cadastros no WooCommerce com pelo menos 1 pedido registrado.")
+k1, k2, k3, k4, k5 = st.columns(5)
 
-card(k2, "💍", "Fiéis + Novos Crushes", f"{ativos:,.0f}",
-     tooltip=f"💍 Fiéis ({fieis:,.0f}): recorrentes recentes (2+ pedidos, últimos 90–180d)\n💘 Novos Crushes ({novos:,.0f}): 1ª compra nos últimos 90 dias.",
-     sub=f"{ativos/total*100:.1f}% da base", color="#f0fff4")
+card(k1, "💍", "Fiéis",         f"{fieis:,.0f}",
+     tooltip="Recorrentes recentes — 2+ pedidos nos últimos 90–180 dias.",
+     sub=f"R$ {receita_fieis/1000:.0f}k receita histórica", color="#f0fff4")
 
-card(k3, "🧊", "Esfriando", f"{em_risco:,.0f}",
-     tooltip="2+ compras mas sem comprar há 181–270 dias. Têm histórico — vale acionar antes de virar Gelando.",
-     sub=f"{em_risco/total*100:.1f}% da base", color="#fff5f5")
+card(k2, "💘", "Novos Crushes", f"{novos:,.0f}",
+     tooltip="1ª compra nos últimos 90 dias. Janela crítica para converter em recorrentes.",
+     sub=f"R$ {receita_novos_c/1000:.0f}k receita histórica", color="#fdf4ff")
 
-card(k4, "💎", "VIPs", f"{vips:,.0f}",
+card(k3, "💎", "VIPs",          f"{vips:,.0f}",
      tooltip="Total > R$5.000 E ticket médio > R$300. Grupo de elite — tratamento prioritário.",
-     sub="Total alto + ticket alto", color="#fffbea")
+     sub=f"R$ {receita_vip/1000:.0f}k receita histórica", color="#fffbea")
 
-card(k5, "💰", "Receita total", f"R$ {receita:,.0f}",
-     tooltip="Soma de todos os pedidos pagos (exclui cancelados e reembolsados), desde o início.")
+card(k4, "🧊", "Esfriando",     f"{esfriando_n:,.0f}",
+     tooltip="2+ compras mas sem comprar há 181–270 dias. Vale acionar antes de gelar.",
+     sub=f"R$ {receita_esfriando/1000:.0f}k em risco", color="#fff5f5")
 
-card(k6, "👻", "Ghosting", f"{ghosting:,.0f}",
-     tooltip="Compraram exatamente 1 vez e sumiram há mais de 6 meses. Maior segmento da base — potencial enorme de reativação.",
-     sub=f"{ghosting/total*100:.1f}% da base", color="#f8fafc")
+card(k5, "👻", "Ghosting",      f"{ghosting:,.0f}",
+     tooltip="Compraram 1 vez e sumiram há 6+ meses. Maior segmento — potencial de reativação.",
+     sub=f"{ghosting/total*100:.0f}% da base", color="#f8fafc")
 
 br()
 
@@ -337,25 +339,55 @@ if not df_vendas.empty:
     cids_antes_ant   = set(filtrar(df_vendas, hoje.replace(year=2000), ini_mes_ant - timedelta(days=1))["customer_id"].unique())
     recompra_mes_ant = len(cids_mes_ant & cids_antes_ant)
 
+    # Receita novos crushes e crushes antigos no mês
+    cids_novos_mes     = set(primeiras[primeiras["primeira_compra"].dt.date >= ini_mes]["customer_id"])
+    cids_novos_mes_ant = set(primeiras[
+        (primeiras["primeira_compra"].dt.date >= ini_mes_ant) &
+        (primeiras["primeira_compra"].dt.date <= fim_mes_ant_equiv)
+    ]["customer_id"])
+
+    rec_novos_mes     = filtrar(df_vendas, ini_mes, hoje)[
+        df_vendas["customer_id"].isin(cids_novos_mes)]["total"].sum()
+    rec_novos_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)[
+        df_vendas["customer_id"].isin(cids_novos_mes_ant)]["total"].sum()
+
+    cids_antigos_mes     = cids_mes - cids_novos_mes
+    cids_antigos_mes_ant = cids_mes_ant - cids_novos_mes_ant
+    rec_antigos_mes     = filtrar(df_vendas, ini_mes, hoje)[
+        df_vendas["customer_id"].isin(cids_antigos_mes)]["total"].sum()
+    rec_antigos_mes_ant = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)[
+        df_vendas["customer_id"].isin(cids_antigos_mes_ant)]["total"].sum()
+
+    nome_mes     = ini_mes.strftime("%B").capitalize()
+    nome_mes_ant = ini_mes_ant.strftime("%B").capitalize()
+
     tk1, tk2, tk3, tk4, tk5 = st.columns(5)
     tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—")
     tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—")
     tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—")
-    tk4.metric("Novos Crushes MTD",   novos_mtd,    delta=int(novos_mtd - novos_mes_ant))
-    tk5.metric("Crushes recorrentes MTD", recompra_mtd, delta=int(recompra_mtd - recompra_mes_ant))
+    tk4.metric(
+        f"💘 Novos Crushes — {nome_mes}",
+        f"{novos_mtd} | R$ {rec_novos_mes/1000:.1f}k",
+        delta=f"{novos_mtd - novos_mes_ant:+d} | R$ {(rec_novos_mes - rec_novos_mes_ant)/1000:+.1f}k vs {nome_mes_ant}",
+    )
+    tk5.metric(
+        f"💍 Crushes Antigos — {nome_mes}",
+        f"{recompra_mtd} | R$ {rec_antigos_mes/1000:.1f}k",
+        delta=f"{recompra_mtd - recompra_mes_ant:+d} | R$ {(rec_antigos_mes - rec_antigos_mes_ant)/1000:+.1f}k vs {nome_mes_ant}",
+    )
 
     br()
 
-    df_30 = df_vendas[df_vendas["date_created"].dt.date >= (hoje - timedelta(days=29))].copy()
-    df_30["dia"] = df_30["date_created"].dt.date
-    df_diario = df_30.groupby("dia")["total"].sum().reset_index()
-    df_diario.columns = ["Data", "Receita"]
-
-    fig_v = px.bar(df_diario, x="Data", y="Receita",
-                   labels={"Receita": "R$", "Data": ""},
-                   color_discrete_sequence=["#7c3aed"])
-    fig_v.update_layout(height=220, margin=dict(l=0,r=0,t=10,b=0))
-    st.plotly_chart(fig_v, use_container_width=True)
+    with st.expander("📊 Ver receita diária — últimos 30 dias"):
+        df_30 = df_vendas[df_vendas["date_created"].dt.date >= (hoje - timedelta(days=29))].copy()
+        df_30["dia"] = df_30["date_created"].dt.date
+        df_diario = df_30.groupby("dia")["total"].sum().reset_index()
+        df_diario.columns = ["Data", "Receita"]
+        fig_v = px.bar(df_diario, x="Data", y="Receita",
+                       labels={"Receita": "R$", "Data": ""},
+                       color_discrete_sequence=["#7c3aed"])
+        fig_v.update_layout(height=220, margin=dict(l=0,r=0,t=10,b=0))
+        st.plotly_chart(fig_v, use_container_width=True)
 
 st.divider()
 
