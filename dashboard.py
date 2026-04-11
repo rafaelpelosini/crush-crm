@@ -287,20 +287,25 @@ if not df_vendas.empty:
         cor = "green" if pct >= 0 else "red"
         return f"<span style='color:{cor}'>{sinal} {abs(pct):.1f}% vs período anterior</span>"
 
+    ontem_sem_ant  = ontem  - timedelta(weeks=1)
+    hoje_sem_ant   = hoje   - timedelta(weeks=1)
+    v_ontem_ref    = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].sum()
+    v_hoje_ref     = filtrar(df_vendas, hoje_sem_ant,  hoje_sem_ant )["total"].sum()
+
     v1, v2, v3, v4 = st.columns(4)
 
-    for col, titulo, atual, anterior in [
-        (v1, "Ontem",       v_ontem,  filtrar(df_vendas, ontem - timedelta(days=1), ontem - timedelta(days=1))["total"].sum()),
-        (v2, "Hoje",        v_hoje,   v_ontem),
-        (v3, "Esta semana", v_semana, v_sem_ant),
-        (v4, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant),
+    for col, titulo, atual, anterior, label_ref in [
+        (v1, "Ontem",       v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"),
+        (v2, "Hoje",        v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"),
+        (v3, "Esta semana", v_semana, v_sem_ant,   "vs semana passada"),
+        (v4, f"Este mês (1–{hoje.day}/{hoje.month})", v_mes, v_mes_ant, label_mes_ant),
     ]:
         d = delta_str(atual, anterior)
         col.markdown(f"""
         <div style="background:#f8fafc;border-radius:12px;padding:20px 24px;height:110px;border:1px solid #e2e8f0">
             <div style="font-size:13px;color:#888;margin-bottom:4px">{titulo}</div>
             <div style="font-size:26px;font-weight:700">R$ {atual:,.0f}</div>
-            {("<div style='font-size:12px;margin-top:4px'>" + d + "</div>") if d else ""}
+            {("<div style='font-size:12px;margin-top:4px'>" + d + f" ({label_ref})" + "</div>") if d else ""}
         </div>
         """, unsafe_allow_html=True)
 
