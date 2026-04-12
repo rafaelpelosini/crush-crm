@@ -1092,8 +1092,8 @@ else:
             FROM primeira_cat pc
             JOIN crm_profiles p ON p.customer_id = pc.customer_id
             WHERE pc.rn = 1
-              AND pc.total >= 50
             GROUP BY pc.category
+            HAVING COUNT(DISTINCT pc.customer_id) >= 50
             ORDER BY pct_conversao DESC
         """)
 
