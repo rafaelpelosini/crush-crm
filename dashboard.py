@@ -709,7 +709,7 @@ def _build_pivot_num(raw):
     p.columns = ["#", "Status"] + _col_names + ["Total"]
     return p
 
-_receita_cfg = {c: st.column_config.NumberColumn(c, format="R$ %d") for c in _col_names + ["Total"]}
+_receita_cfg = {c: st.column_config.NumberColumn(c, format="R$ %,.0f") for c in _col_names + ["Total"]}
 
 tab_sv_n, tab_sv_r = st.tabs(["👥 Clientes", "💰 Receita"])
 with tab_sv_n:
