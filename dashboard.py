@@ -1056,56 +1056,134 @@ st.divider()
 # ── Visão de produto ──────────────────────────────────────────────────────────
 
 section("Visão de produto",
-        "Análise dos produtos comprados. Mostra o que vende mais, quais produtos atraem VIPs e o que as clientes compram depois da primeira compra.")
+        "Análise orientada a ação: quais categorias convertem mais clientes para recorrência, como o mix varia por segmento, e quais produtos dominam entre VIPs.")
 
 df_items_exist = query("SELECT COUNT(*) n FROM order_items").iloc[0]["n"]
 
 if df_items_exist == 0:
     st.info("Dados de produto ainda não disponíveis. Rode um sync completo: `python sync.py --full`")
 else:
-    # Remove sufixo de tamanho: "Camiseta X - M" → "Camiseta X"
     STRIP_SIZE = "regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{1,3}$', '')"
 
-    pt1, pt2, pt3 = st.tabs(["🏆 Mais vendidos", "💎 Preferidos dos VIPs", "🔄 Geram 2ª compra"])
+    pt1, pt2, pt3, pt4 = st.tabs([
+        "🎯 Conversão por categoria",
+        "🗂️ Mix por segmento",
+        "💎 Preferidos dos VIPs",
+        "🏆 Mais vendidos",
+    ])
 
+    # ── Tab 1: Conversão por categoria ───────────────────────────────────────
     with pt1:
-        df_top = query(f"""
-            SELECT {STRIP_SIZE} AS produto,
-                   COUNT(DISTINCT i.order_id)       pedidos,
-                   SUM(i.quantity)                  unidades,
-                   ROUND(SUM(i.total)::numeric, 0)  receita,
-                   ROUND(AVG(i.total / NULLIF(i.quantity,0))::numeric, 0) ticket_unit
-            FROM order_items i
-            JOIN orders o ON o.woo_id = i.order_id
-            WHERE o.status NOT IN ('cancelled','refunded','failed')
-              AND i.product_name != ''
-            GROUP BY {STRIP_SIZE}
-            ORDER BY receita DESC
-            LIMIT 30
+        df_conv = query("""
+            WITH primeira_cat AS (
+                SELECT o.customer_id, i.category,
+                       ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) AS rn
+                FROM orders o
+                JOIN order_items i ON i.order_id = o.woo_id
+                WHERE o.status NOT IN ('cancelled','refunded','failed')
+                  AND i.category IS NOT NULL AND i.category != ''
+            )
+            SELECT pc.category AS categoria,
+                   COUNT(DISTINCT pc.customer_id)                                                    total,
+                   COUNT(DISTINCT CASE WHEN p.orders_count >= 2 THEN pc.customer_id END)             recorrentes,
+                   ROUND(100.0 * COUNT(DISTINCT CASE WHEN p.orders_count >= 2 THEN pc.customer_id END)
+                         / NULLIF(COUNT(DISTINCT pc.customer_id), 0), 1)                             pct_conversao,
+                   ROUND(AVG(p.avg_ticket)::numeric, 0)                                             ticket_medio
+            FROM primeira_cat pc
+            JOIN crm_profiles p ON p.customer_id = pc.customer_id
+            WHERE pc.rn = 1
+              AND pc.total >= 50
+            GROUP BY pc.category
+            ORDER BY pct_conversao DESC
         """)
 
-        fig_top = px.bar(
-            df_top.head(15), x="receita", y="produto", orientation="h",
-            text=df_top.head(15)["receita"].apply(lambda x: f"R$ {x:,.0f}"),
-            color_discrete_sequence=["#7c3aed"],
-            labels={"receita": "Receita (R$)", "produto": ""}
-        )
-        fig_top.update_traces(textposition="outside")
-        fig_top.update_layout(height=480, margin=dict(l=0, r=100, t=10, b=0), showlegend=False)
-        st.plotly_chart(fig_top, use_container_width=True)
+        st.markdown("""
+<div style="font-size:0.82rem;color:#666;margin-bottom:12px">
+Quem começa por <b>Moletons, Calças e Vestidos</b> tem maior chance de fazer uma 2ª compra.
+Quem começa por <b>Body e Bolsas</b> converte menos — vale acionar mais rápido após a 1ª compra.
+</div>""", unsafe_allow_html=True)
 
-        df_top_fmt = df_top.copy()
-        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(float)
-        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(float)
-        df_top_fmt.columns        = ["Produto", "Pedidos", "Unidades", "Receita", "Ticket unit."]
-        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True, column_config={
-            "Receita":     st.column_config.NumberColumn("Receita",     format="R$ %,.0f"),
-            "Ticket unit.":st.column_config.NumberColumn("Ticket unit.",format="R$ %,.0f"),
-            "Pedidos":     st.column_config.NumberColumn("Pedidos",     format="%,.0f"),
-            "Unidades":    st.column_config.NumberColumn("Unidades",    format="%,.0f"),
-        })
+        if not df_conv.empty:
+            fig_conv = px.bar(
+                df_conv, x="categoria", y="pct_conversao",
+                text=df_conv["pct_conversao"].apply(lambda x: f"{x:.1f}%"),
+                color="pct_conversao",
+                color_continuous_scale=["#ef4444","#f59e0b","#22c55e"],
+                labels={"pct_conversao": "% converte para 2ª compra", "categoria": ""},
+            )
+            fig_conv.update_traces(textposition="outside")
+            fig_conv.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=0),
+                                   showlegend=False, coloraxis_showscale=False)
+            st.plotly_chart(fig_conv, use_container_width=True)
 
+            df_conv["total"]        = df_conv["total"].astype(int)
+            df_conv["recorrentes"]  = df_conv["recorrentes"].astype(int)
+            df_conv["pct_conversao"]= df_conv["pct_conversao"].astype(float)
+            df_conv["ticket_medio"] = df_conv["ticket_medio"].astype(float)
+            df_conv.columns = ["Categoria", "Compradores 1ª vez", "Viraram recorrentes", "% Conversão", "Ticket médio"]
+            st.dataframe(df_conv, hide_index=True, use_container_width=True, column_config={
+                "Compradores 1ª vez":   st.column_config.NumberColumn("Compradores 1ª vez",   format="%,.0f"),
+                "Viraram recorrentes":  st.column_config.NumberColumn("Viraram recorrentes",   format="%,.0f"),
+                "% Conversão":          st.column_config.NumberColumn("% Conversão",           format="%.1f%%"),
+                "Ticket médio":         st.column_config.NumberColumn("Ticket médio",          format="R$ %,.0f"),
+            })
+
+    # ── Tab 2: Mix por segmento ───────────────────────────────────────────────
     with pt2:
+        df_mix = query("""
+            SELECT p.status_code, p.status_label,
+                   i.category,
+                   ROUND(SUM(i.total)::numeric, 0) receita
+            FROM order_items i
+            JOIN orders o ON o.woo_id = i.order_id
+            JOIN crm_profiles p ON p.customer_id = o.customer_id
+            WHERE i.category IS NOT NULL AND i.category != ''
+              AND o.status NOT IN ('cancelled','refunded','failed')
+            GROUP BY p.status_code, p.status_label, i.category
+        """)
+
+        if not df_mix.empty:
+            _s_ord = {"S1":1,"S2":2,"S3":3,"S7":4,"S4":5,"S5":6,"S6":7,"S0":8}
+            cats_order = ["Camisetas","Vestidos","Calças","Macacões","Moletons",
+                          "Jaquetas","Bolsas","Body","Camisas","Kimonos","Bonés"]
+
+            pivot_mix = df_mix.pivot_table(index="status_code", columns="category",
+                                           values="receita", aggfunc="sum", fill_value=0)
+            # mantém só categorias principais
+            for c in cats_order:
+                if c not in pivot_mix.columns: pivot_mix[c] = 0
+            pivot_mix = pivot_mix[[c for c in cats_order if c in pivot_mix.columns]]
+            pivot_mix["Total"] = pivot_mix.sum(axis=1)
+            # normaliza para % do mix
+            pivot_pct = pivot_mix.div(pivot_mix["Total"], axis=0).drop(columns="Total") * 100
+
+            pivot_pct = pivot_pct.reset_index()
+            pivot_pct["_ord"] = pivot_pct["status_code"].map(_s_ord)
+            pivot_pct["Status"] = pivot_pct["status_code"].map(_status_labels)
+            pivot_pct = pivot_pct.sort_values("_ord").drop(columns=["_ord","status_code"])
+            pivot_pct = pivot_pct.set_index("Status")
+
+            st.markdown("""
+<div style="font-size:0.82rem;color:#666;margin-bottom:12px">
+% da receita de cada segmento por categoria. Fiéis concentram mais em Vestidos e Macacões.
+Ghosting tem proporcionalmente mais Bolsas — pode indicar produto de impulso sem fidelização.
+</div>""", unsafe_allow_html=True)
+
+            fig_mix = px.imshow(
+                pivot_pct.values,
+                x=list(pivot_pct.columns),
+                y=list(pivot_pct.index),
+                color_continuous_scale="Blues",
+                text_auto=".1f",
+                aspect="auto",
+                labels={"color": "% do mix"},
+            )
+            fig_mix.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=0))
+            fig_mix.update_traces(texttemplate="%{z:.1f}%")
+            st.plotly_chart(fig_mix, use_container_width=True)
+
+    # ── Tab 3: Preferidos dos VIPs ────────────────────────────────────────────
+    with pt3:
         df_vip_prod = query(f"""
             SELECT {STRIP_SIZE} AS produto,
                    COUNT(DISTINCT i.order_id)      pedidos,
@@ -1130,29 +1208,31 @@ else:
             "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
         })
 
-    with pt3:
-        df_seg2 = query(f"""
+    # ── Tab 4: Mais vendidos ──────────────────────────────────────────────────
+    with pt4:
+        df_top = query(f"""
             SELECT {STRIP_SIZE} AS produto,
-                   COUNT(DISTINCT o.customer_id)   clientes,
-                   SUM(i.quantity)                 unidades,
-                   ROUND(SUM(i.total)::numeric, 0) receita
+                   COUNT(DISTINCT i.order_id)       pedidos,
+                   SUM(i.quantity)                  unidades,
+                   ROUND(SUM(i.total)::numeric, 0)  receita,
+                   ROUND(AVG(i.total / NULLIF(i.quantity,0))::numeric, 0) ticket_unit
             FROM order_items i
             JOIN orders o ON o.woo_id = i.order_id
-            JOIN crm_profiles p ON p.customer_id = o.customer_id
-            WHERE p.frequencia_code != 'F1'
-              AND o.status NOT IN ('cancelled','refunded','failed')
+            WHERE o.status NOT IN ('cancelled','refunded','failed')
               AND i.product_name != ''
             GROUP BY {STRIP_SIZE}
-            ORDER BY clientes DESC
-            LIMIT 20
+            ORDER BY receita DESC
+            LIMIT 30
         """)
-        st.caption("Produtos comprados por clientes que fizeram 2+ pedidos — indicam o que gera recorrência")
-        df_seg2["receita"] = df_seg2["receita"].apply(float)
-        df_seg2.columns    = ["Produto", "Clientes", "Unidades", "Receita"]
-        st.dataframe(df_seg2, hide_index=True, use_container_width=True, column_config={
-            "Receita":  st.column_config.NumberColumn("Receita",  format="R$ %,.0f"),
-            "Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f"),
-            "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
+        df_top_fmt = df_top.copy()
+        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(float)
+        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(float)
+        df_top_fmt.columns        = ["Produto", "Pedidos", "Unidades", "Receita", "Ticket unit."]
+        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True, column_config={
+            "Receita":     st.column_config.NumberColumn("Receita",     format="R$ %,.0f"),
+            "Ticket unit.":st.column_config.NumberColumn("Ticket unit.",format="R$ %,.0f"),
+            "Pedidos":     st.column_config.NumberColumn("Pedidos",     format="%,.0f"),
+            "Unidades":    st.column_config.NumberColumn("Unidades",    format="%,.0f"),
         })
 
 st.divider()
