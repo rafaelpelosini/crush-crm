@@ -253,7 +253,8 @@ _crescimento = query("""
             COUNT(CASE WHEN registration_date::date >= CURRENT_DATE - 30        THEN 1 END) ultimos_30d,
             COUNT(CASE WHEN registration_date::date >= date_trunc('month', CURRENT_DATE) THEN 1 END) mes_atual,
             COUNT(CASE WHEN registration_date::date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
-                        AND registration_date::date < date_trunc('month', CURRENT_DATE) THEN 1 END) mes_anterior
+                        AND registration_date::date < date_trunc('month', CURRENT_DATE) - interval '1 month'
+                            + (CURRENT_DATE - date_trunc('month', CURRENT_DATE)::date) * interval '1 day' THEN 1 END) mes_anterior
         FROM customers
         WHERE registration_date IS NOT NULL AND registration_date != ''
     )
