@@ -1069,7 +1069,7 @@ else:
         "🎯 Conversão por categoria",
         "🗂️ Mix por segmento",
         "💎 Preferidos dos VIPs",
-        "🏆 Mais vendidos",
+        "⚓ Produtos âncora",
     ])
 
     # ── Tab 1: Conversão por categoria ───────────────────────────────────────
@@ -1208,32 +1208,89 @@ Ghosting tem proporcionalmente mais Bolsas — pode indicar produto de impulso s
             "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
         })
 
-    # ── Tab 4: Mais vendidos ──────────────────────────────────────────────────
+    # ── Tab 4: Produtos âncora ────────────────────────────────────────────────
     with pt4:
-        df_top = query(f"""
-            SELECT {STRIP_SIZE} AS produto,
-                   COUNT(DISTINCT i.order_id)       pedidos,
-                   SUM(i.quantity)                  unidades,
-                   ROUND(SUM(i.total)::numeric, 0)  receita,
-                   ROUND(AVG(i.total / NULLIF(i.quantity,0))::numeric, 0) ticket_unit
-            FROM order_items i
-            JOIN orders o ON o.woo_id = i.order_id
-            WHERE o.status NOT IN ('cancelled','refunded','failed')
-              AND i.product_name != ''
-            GROUP BY {STRIP_SIZE}
-            ORDER BY receita DESC
-            LIMIT 30
+        df_ancora = query(f"""
+            WITH geral AS (
+                SELECT {STRIP_SIZE} AS produto,
+                       ROUND(SUM(i.total)::numeric, 0)       receita_geral,
+                       COUNT(DISTINCT i.order_id)             pedidos_geral,
+                       RANK() OVER (ORDER BY SUM(i.total) DESC) rank_geral
+                FROM order_items i
+                JOIN orders o ON o.woo_id = i.order_id
+                WHERE o.status NOT IN ('cancelled','refunded','failed')
+                  AND i.product_name != ''
+                GROUP BY {STRIP_SIZE}
+            ),
+            vip AS (
+                SELECT {STRIP_SIZE} AS produto,
+                       ROUND(SUM(i.total)::numeric, 0)       receita_vip,
+                       COUNT(DISTINCT o.customer_id)          clientes_vip,
+                       RANK() OVER (ORDER BY SUM(i.total) DESC) rank_vip
+                FROM order_items i
+                JOIN orders o ON o.woo_id = i.order_id
+                JOIN crm_profiles p ON p.customer_id = o.customer_id
+                WHERE p.valor_code IN ('V1','V2')
+                  AND o.status NOT IN ('cancelled','refunded','failed')
+                  AND i.product_name != ''
+                GROUP BY {STRIP_SIZE}
+            )
+            SELECT g.produto,
+                   g.rank_geral,
+                   v.rank_vip,
+                   g.receita_geral,
+                   v.receita_vip,
+                   ROUND(100.0 * v.receita_vip / NULLIF(g.receita_geral, 0), 0) pct_vip,
+                   v.clientes_vip,
+                   (g.rank_geral + v.rank_vip) AS score_ancora
+            FROM geral g
+            JOIN vip v ON v.produto = g.produto
+            WHERE g.rank_geral <= 50 AND v.rank_vip <= 50
+            ORDER BY score_ancora
+            LIMIT 20
         """)
-        df_top_fmt = df_top.copy()
-        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(float)
-        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(float)
-        df_top_fmt.columns        = ["Produto", "Pedidos", "Unidades", "Receita", "Ticket unit."]
-        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True, column_config={
-            "Receita":     st.column_config.NumberColumn("Receita",     format="R$ %,.0f"),
-            "Ticket unit.":st.column_config.NumberColumn("Ticket unit.",format="R$ %,.0f"),
-            "Pedidos":     st.column_config.NumberColumn("Pedidos",     format="%,.0f"),
-            "Unidades":    st.column_config.NumberColumn("Unidades",    format="%,.0f"),
-        })
+
+        st.markdown("""
+<div style="font-size:0.82rem;color:#666;margin-bottom:12px">
+Produtos que estão no top de receita geral <b>e</b> são preferidos pelas clientes de alto valor.
+Estes são os pilares da marca — prioridade em estoque, comunicação e campanhas de lançamento.
+</div>""", unsafe_allow_html=True)
+
+        if not df_ancora.empty:
+            # Scatter: rank geral × rank VIP — quanto mais perto do canto inferior esquerdo, mais âncora
+            fig_ancora = px.scatter(
+                df_ancora,
+                x="rank_geral", y="rank_vip",
+                text="produto",
+                size="receita_geral",
+                color="pct_vip",
+                color_continuous_scale="Greens",
+                labels={
+                    "rank_geral": "Rank receita geral (↓ melhor)",
+                    "rank_vip":   "Rank receita VIPs (↓ melhor)",
+                    "pct_vip":    "% receita de VIPs",
+                },
+                hover_data={"receita_geral": ":,.0f", "receita_vip": ":,.0f", "clientes_vip": True},
+            )
+            fig_ancora.update_traces(textposition="top center", textfont_size=10)
+            fig_ancora.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0),
+                                     coloraxis_colorbar=dict(title="% VIP"))
+            st.plotly_chart(fig_ancora, use_container_width=True)
+
+            df_ancora["receita_geral"] = df_ancora["receita_geral"].astype(float)
+            df_ancora["receita_vip"]   = df_ancora["receita_vip"].astype(float)
+            df_ancora["pct_vip"]       = df_ancora["pct_vip"].astype(float)
+            df_ancora.drop(columns=["score_ancora"], inplace=True)
+            df_ancora.columns = ["Produto", "Rank geral", "Rank VIP", "Receita geral",
+                                  "Receita VIPs", "% de VIPs", "Clientes VIP"]
+            st.dataframe(df_ancora, hide_index=True, use_container_width=True, column_config={
+                "Receita geral":  st.column_config.NumberColumn("Receita geral",  format="R$ %,.0f"),
+                "Receita VIPs":   st.column_config.NumberColumn("Receita VIPs",   format="R$ %,.0f"),
+                "% de VIPs":      st.column_config.NumberColumn("% de VIPs",      format="%.0f%%"),
+                "Clientes VIP":   st.column_config.NumberColumn("Clientes VIP",   format="%,.0f"),
+                "Rank geral":     st.column_config.NumberColumn("Rank geral",     format="%d"),
+                "Rank VIP":       st.column_config.NumberColumn("Rank VIP",       format="%d"),
+            })
 
 st.divider()
 
