@@ -772,301 +772,6 @@ st.markdown("""
 
 st.divider()
 
-# ── Antiguidade da Base ───────────────────────────────────────────────────────
-
-section("Antiguidade da Base", "Há quanto tempo cada grupo de clientes está cadastrado.")
-
-_tenure_ord = {"T1":1,"T2":2,"T3":3,"T4":4,"T5":5,"T6":6,"T7":7,"T8":8}
-df_tenure_tbl = df_tenure.copy()
-df_tenure_tbl["_ord"] = df_tenure_tbl["code"].map(_tenure_ord)
-df_tenure_tbl = df_tenure_tbl.sort_values("_ord").drop(columns="_ord")
-df_tenure_tbl["Clientes"] = df_tenure_tbl["n"].astype(int)
-df_tenure_tbl["%"] = df_tenure_tbl["pct"].apply(lambda x: f"{x:.1f}%")
-
-_tenure_range = {
-    "T1": "até 3 meses",
-    "T2": "3–6 meses",
-    "T3": "6–12 meses",
-    "T4": "1–2 anos",
-    "T5": "2–3 anos",
-    "T6": "3–4 anos",
-    "T7": "4–5 anos",
-    "T8": "5+ anos",
-}
-df_tenure_tbl["Período"] = df_tenure_tbl["code"].map(_tenure_range)
-st.dataframe(
-    df_tenure_tbl[["code","label","Período","Clientes","%"]].rename(columns={"code":"Código","label":"Fase"}),
-    hide_index=True, use_container_width=True,
-    column_config={"Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f")}
-)
-
-st.divider()
-
-# ── Ações sugeridas ───────────────────────────────────────────────────────────
-
-section("Ações recomendadas",
-        "Segmentos prioritários identificados automaticamente pelo CRM. Cada card mostra quantos clientes estão nesse grupo e sugere o canal de ação. Baixe a lista direto para subir no Meta Ads ou disparar email.")
-
-em_risco_alto = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
-""").iloc[0]["n"]
-
-gelando_alto = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
-""").iloc[0]["n"]
-
-segundo_pedido_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
-""").iloc[0]["n"]
-
-em_pausa_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S7'
-""").iloc[0]["n"]
-
-ghosting_recente_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S6' AND recencia_code = 'R3'
-""").iloc[0]["n"]
-
-receita_em_risco = query("""
-    SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles
-    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
-""").iloc[0]["v"] or 0
-
-hoje_str = now_brt().strftime("%Y-%m-%d")
-
-ACOES = [
-    {
-        "prioridade": "🔴 Alta",
-        "acao": "Reativação urgente",
-        "segmento": "Esfriando (alto valor)",
-        "clientes": em_risco_alto,
-        "detalhe": f"R$ {receita_em_risco:,.0f} em receita histórica em jogo",
-        "canal": "Email + WhatsApp",
-        "bg": "#fff5f5",
-        "tooltip": "Clientes que gastaram R$500+ mas não compram há 181–270 dias. Janela crítica antes de gelar de vez.",
-        "filtro": "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
-        "arquivo": f"{hoje_str}_em_risco_alto_valor.csv",
-    },
-    {
-        "prioridade": "🔴 Alta",
-        "acao": "Win-back",
-        "segmento": "Gelando (alto valor)",
-        "clientes": gelando_alto,
-        "detalhe": "Gastaram muito — vale uma oferta exclusiva",
-        "canal": "Email personalizado",
-        "bg": "#fff5f5",
-        "tooltip": "Clientes de alto valor (R$2.500+) que sumiram há 9 meses ou mais. Última janela real de recuperação.",
-        "filtro": "status_code = 'S5' AND valor_code IN ('V1','V2')",
-        "arquivo": f"{hoje_str}_perdidos_alto_valor.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Induzir 2ª compra",
-        "segmento": "Novo Crush recente",
-        "clientes": segundo_pedido_n,
-        "detalhe": "2ª compra é o maior preditor de fidelização",
-        "canal": "Email + Meta Ads retargeting",
-        "bg": "#fffbea",
-        "tooltip": "Fizeram 1 pedido nos últimos 90 dias. O segundo pedido transforma um comprador casual em cliente fiel.",
-        "filtro": "frequencia_code = 'F1' AND recencia_code = 'R1'",
-        "arquivo": f"{hoje_str}_segundo_pedido.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Trazer de volta",
-        "segmento": "Em Pausa (com histórico)",
-        "clientes": em_pausa_n,
-        "detalhe": "2+ compras — têm vínculo real com a marca",
-        "canal": "Email + remarketing",
-        "bg": "#fffbea",
-        "tooltip": "Clientes com 2+ pedidos que pausaram há 3–9 meses. Diferente do Ghosting — elas já provaram que voltam.",
-        "filtro": "status_code = 'S7'",
-        "arquivo": f"{hoje_str}_em_pausa.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Reativar Ghosting recente",
-        "segmento": "Ghosting 6–9 meses",
-        "clientes": ghosting_recente_n,
-        "detalhe": "Ainda dentro da janela de memória da marca",
-        "canal": "Meta Ads retargeting",
-        "bg": "#fffbea",
-        "tooltip": "Compraram 1 vez e sumiram há 6–9 meses. Mais recentes têm maior chance de responder do que os que sumiram há 1 ano+.",
-        "filtro": "status_code = 'S6' AND recencia_code = 'R3'",
-        "arquivo": f"{hoje_str}_ghosting_recente.csv",
-    },
-    {
-        "prioridade": "🟢 Contínua",
-        "acao": "Lookalike Meta Ads",
-        "segmento": "VIPs + Lovers ativos",
-        "clientes": int(vips),
-        "detalhe": "Seed para encontrar novos clientes parecidos",
-        "canal": "Meta Ads",
-        "bg": "#f0fff4",
-        "tooltip": "Os melhores clientes ativos da base. Usados como modelo para o Meta Ads encontrar pessoas com perfil similar.",
-        "filtro": "personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",
-        "arquivo": f"{hoje_str}_lookalike_seed.csv",
-    },
-]
-
-cols = st.columns(3)
-for i, a in enumerate(ACOES):
-    col = cols[i % 3]
-    col.markdown(f"""
-    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:175px;border:1px solid #e2e8f0">
-        <div style="font-size:11px;color:#888;margin-bottom:6px">{a['prioridade']}</div>
-        <div style="font-size:14px;font-weight:700;margin-bottom:2px">{a['acao']} {tip(a['tooltip'])}</div>
-        <div style="font-size:12px;color:#555;margin-bottom:6px">{a['segmento']}</div>
-        <div style="font-size:20px;font-weight:700;color:#7c3aed">{a['clientes']:,.0f} <span style="font-size:11px;font-weight:400;color:#888">clientes</span></div>
-        <div style="font-size:11px;color:#aaa;margin-top:4px">{a['detalhe']}</div>
-        <div style="font-size:11px;color:#7c3aed;margin-top:4px">📣 {a['canal']}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    br()
-    col.download_button(
-        label="⬇️ Baixar lista",
-        data=csv_bytes(a["filtro"]),
-        file_name=a["arquivo"],
-        mime="text/csv",
-        use_container_width=True,
-        key=f"dl_{a['arquivo']}",
-    )
-
-br()
-st.divider()
-
-# ── Segmentos prioritários ────────────────────────────────────────────────────
-
-section("Segmentos de ação", "Listas detalhadas de clientes por segmento. Use para revisar manualmente ou exportar para campanhas.")
-
-TENURE_GRUPOS = {
-    "Toda a base":                   "",
-    "Recentes — últimos 18 meses":   "AND tenure_code IN ('T1','T2','T3')",
-    "Intermediárias — 2022 a 2024":  "AND tenure_code IN ('T4','T5')",
-    "Base antiga — 2020 a 2021":     "AND tenure_code IN ('T6','T7','T8')",
-}
-tenure_filtro_label = st.selectbox(
-    "Recorte por antiguidade",
-    list(TENURE_GRUPOS.keys()),
-    help="Filtra os segmentos abaixo por quanto tempo a cliente está na base",
-)
-tenure_filtro = TENURE_GRUPOS[tenure_filtro_label]
-
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "💎 VIPs",
-    "🧊 Esfriando (alto valor)",
-    "💘 Segundo pedido",
-    "🌤 Morno",
-    "⏸️ Em Pausa",
-    "❄️ Gelando (alto valor)",
-    "👻 Ghosting",
-])
-
-_cfg_seg_r = {
-    "gasto_total":  st.column_config.NumberColumn("gasto_total",  format="R$ %,.0f"),
-    "ticket_medio": st.column_config.NumberColumn("ticket_medio", format="R$ %,.0f"),
-    "pedidos":      st.column_config.NumberColumn("pedidos",      format="%d"),
-    "score":        st.column_config.NumberColumn("score",        format="%d"),
-}
-
-with tab1:
-    st.caption("Clientes que gastaram R$ 5.000+ no total. Tratamento VIP — não perder por nada.")
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               ROUND(avg_ticket,0) ticket_medio, last_order_date ultima_compra,
-               tenure_label antiguidade, score, score_label
-        FROM crm_profiles
-        WHERE valor_code = 'V1' {tenure_filtro}
-        ORDER BY score DESC
-    """)
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab2:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, recencia_label temperatura,
-               tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3') {tenure_filtro}
-        ORDER BY total_spent DESC
-    """)
-    st.caption(f"{len(df)} clientes com histórico relevante (R$500+) que não compram há 181–270 dias.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab3:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE frequencia_code = 'F1' AND recencia_code = 'R1' {tenure_filtro}
-        ORDER BY total_spent DESC
-    """)
-    st.caption(f"{len(df)} clientes que fizeram 1 pedido nos últimos 90 dias — a 2ª compra é o maior preditor de fidelização.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab4:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               frequencia_label frequencia,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, recencia_label recencia,
-               tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE status_code = 'S3' {tenure_filtro}
-        ORDER BY total_spent DESC
-    """)
-    st.caption(f"{len(df)} clientes com 1 compra há 3–6 meses. Ainda não voltaram — janela de conversão aberta.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab5:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               frequencia_label frequencia,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, recencia_label recencia,
-               tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE status_code = 'S7' {tenure_filtro}
-        ORDER BY total_spent DESC
-    """)
-    st.caption(f"{len(df)} clientes com 2+ compras que pausaram há 3–9 meses. Têm histórico real — maior chance de reativação.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab6:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               orders_count pedidos, ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE status_code = 'S5' AND valor_code IN ('V1','V2') {tenure_filtro}
-        ORDER BY total_spent DESC
-    """)
-    st.caption(f"{len(df)} clientes de alto valor (R$2.500+) gelando há 9 meses–1 ano+ — campanha win-back.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-with tab7:
-    df = query(f"""
-        SELECT first_name || ' ' || last_name nome, email,
-               ROUND(total_spent,0) gasto_total,
-               last_order_date ultima_compra, recencia_label recencia,
-               tenure_label antiguidade, score
-        FROM crm_profiles
-        WHERE status_code = 'S6' {tenure_filtro}
-        ORDER BY total_spent DESC, last_order_date DESC
-    """)
-    st.caption(f"{len(df)} clientes que compraram exatamente 1 vez e sumiram há mais de 6 meses. Segmento de reativação em massa.")
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
-
-st.divider()
-
 # ── Visão de produto ──────────────────────────────────────────────────────────
 
 section("Visão de produto",
@@ -1767,6 +1472,301 @@ with _tab_achados:
   <div style="font-size:0.82rem;font-weight:700;color:#374151;margin-bottom:4px">{ach['label']}</div>
   <div style="font-size:0.78rem;color:#4b5563;line-height:1.5">{ach['msg']}</div>
 </div>""", unsafe_allow_html=True)
+
+st.divider()
+
+# ── Antiguidade da Base ───────────────────────────────────────────────────────
+
+section("Antiguidade da Base", "Há quanto tempo cada grupo de clientes está cadastrado.")
+
+_tenure_ord = {"T1":1,"T2":2,"T3":3,"T4":4,"T5":5,"T6":6,"T7":7,"T8":8}
+df_tenure_tbl = df_tenure.copy()
+df_tenure_tbl["_ord"] = df_tenure_tbl["code"].map(_tenure_ord)
+df_tenure_tbl = df_tenure_tbl.sort_values("_ord").drop(columns="_ord")
+df_tenure_tbl["Clientes"] = df_tenure_tbl["n"].astype(int)
+df_tenure_tbl["%"] = df_tenure_tbl["pct"].apply(lambda x: f"{x:.1f}%")
+
+_tenure_range = {
+    "T1": "até 3 meses",
+    "T2": "3–6 meses",
+    "T3": "6–12 meses",
+    "T4": "1–2 anos",
+    "T5": "2–3 anos",
+    "T6": "3–4 anos",
+    "T7": "4–5 anos",
+    "T8": "5+ anos",
+}
+df_tenure_tbl["Período"] = df_tenure_tbl["code"].map(_tenure_range)
+st.dataframe(
+    df_tenure_tbl[["code","label","Período","Clientes","%"]].rename(columns={"code":"Código","label":"Fase"}),
+    hide_index=True, use_container_width=True,
+    column_config={"Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f")}
+)
+
+st.divider()
+
+# ── Ações sugeridas ───────────────────────────────────────────────────────────
+
+section("Ações recomendadas",
+        "Segmentos prioritários identificados automaticamente pelo CRM. Cada card mostra quantos clientes estão nesse grupo e sugere o canal de ação. Baixe a lista direto para subir no Meta Ads ou disparar email.")
+
+em_risco_alto = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
+""").iloc[0]["n"]
+
+gelando_alto = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
+""").iloc[0]["n"]
+
+segundo_pedido_n = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
+""").iloc[0]["n"]
+
+em_pausa_n = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S7'
+""").iloc[0]["n"]
+
+ghosting_recente_n = query("""
+    SELECT COUNT(*) n FROM crm_profiles
+    WHERE status_code = 'S6' AND recencia_code = 'R3'
+""").iloc[0]["n"]
+
+receita_em_risco = query("""
+    SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles
+    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
+""").iloc[0]["v"] or 0
+
+hoje_str = now_brt().strftime("%Y-%m-%d")
+
+ACOES = [
+    {
+        "prioridade": "🔴 Alta",
+        "acao": "Reativação urgente",
+        "segmento": "Esfriando (alto valor)",
+        "clientes": em_risco_alto,
+        "detalhe": f"R$ {receita_em_risco:,.0f} em receita histórica em jogo",
+        "canal": "Email + WhatsApp",
+        "bg": "#fff5f5",
+        "tooltip": "Clientes que gastaram R$500+ mas não compram há 181–270 dias. Janela crítica antes de gelar de vez.",
+        "filtro": "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
+        "arquivo": f"{hoje_str}_em_risco_alto_valor.csv",
+    },
+    {
+        "prioridade": "🔴 Alta",
+        "acao": "Win-back",
+        "segmento": "Gelando (alto valor)",
+        "clientes": gelando_alto,
+        "detalhe": "Gastaram muito — vale uma oferta exclusiva",
+        "canal": "Email personalizado",
+        "bg": "#fff5f5",
+        "tooltip": "Clientes de alto valor (R$2.500+) que sumiram há 9 meses ou mais. Última janela real de recuperação.",
+        "filtro": "status_code = 'S5' AND valor_code IN ('V1','V2')",
+        "arquivo": f"{hoje_str}_perdidos_alto_valor.csv",
+    },
+    {
+        "prioridade": "🟡 Média",
+        "acao": "Induzir 2ª compra",
+        "segmento": "Novo Crush recente",
+        "clientes": segundo_pedido_n,
+        "detalhe": "2ª compra é o maior preditor de fidelização",
+        "canal": "Email + Meta Ads retargeting",
+        "bg": "#fffbea",
+        "tooltip": "Fizeram 1 pedido nos últimos 90 dias. O segundo pedido transforma um comprador casual em cliente fiel.",
+        "filtro": "frequencia_code = 'F1' AND recencia_code = 'R1'",
+        "arquivo": f"{hoje_str}_segundo_pedido.csv",
+    },
+    {
+        "prioridade": "🟡 Média",
+        "acao": "Trazer de volta",
+        "segmento": "Em Pausa (com histórico)",
+        "clientes": em_pausa_n,
+        "detalhe": "2+ compras — têm vínculo real com a marca",
+        "canal": "Email + remarketing",
+        "bg": "#fffbea",
+        "tooltip": "Clientes com 2+ pedidos que pausaram há 3–9 meses. Diferente do Ghosting — elas já provaram que voltam.",
+        "filtro": "status_code = 'S7'",
+        "arquivo": f"{hoje_str}_em_pausa.csv",
+    },
+    {
+        "prioridade": "🟡 Média",
+        "acao": "Reativar Ghosting recente",
+        "segmento": "Ghosting 6–9 meses",
+        "clientes": ghosting_recente_n,
+        "detalhe": "Ainda dentro da janela de memória da marca",
+        "canal": "Meta Ads retargeting",
+        "bg": "#fffbea",
+        "tooltip": "Compraram 1 vez e sumiram há 6–9 meses. Mais recentes têm maior chance de responder do que os que sumiram há 1 ano+.",
+        "filtro": "status_code = 'S6' AND recencia_code = 'R3'",
+        "arquivo": f"{hoje_str}_ghosting_recente.csv",
+    },
+    {
+        "prioridade": "🟢 Contínua",
+        "acao": "Lookalike Meta Ads",
+        "segmento": "VIPs + Lovers ativos",
+        "clientes": int(vips),
+        "detalhe": "Seed para encontrar novos clientes parecidos",
+        "canal": "Meta Ads",
+        "bg": "#f0fff4",
+        "tooltip": "Os melhores clientes ativos da base. Usados como modelo para o Meta Ads encontrar pessoas com perfil similar.",
+        "filtro": "personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",
+        "arquivo": f"{hoje_str}_lookalike_seed.csv",
+    },
+]
+
+cols = st.columns(3)
+for i, a in enumerate(ACOES):
+    col = cols[i % 3]
+    col.markdown(f"""
+    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:175px;border:1px solid #e2e8f0">
+        <div style="font-size:11px;color:#888;margin-bottom:6px">{a['prioridade']}</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:2px">{a['acao']} {tip(a['tooltip'])}</div>
+        <div style="font-size:12px;color:#555;margin-bottom:6px">{a['segmento']}</div>
+        <div style="font-size:20px;font-weight:700;color:#7c3aed">{a['clientes']:,.0f} <span style="font-size:11px;font-weight:400;color:#888">clientes</span></div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">{a['detalhe']}</div>
+        <div style="font-size:11px;color:#7c3aed;margin-top:4px">📣 {a['canal']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    br()
+    col.download_button(
+        label="⬇️ Baixar lista",
+        data=csv_bytes(a["filtro"]),
+        file_name=a["arquivo"],
+        mime="text/csv",
+        use_container_width=True,
+        key=f"dl_{a['arquivo']}",
+    )
+
+br()
+st.divider()
+
+# ── Segmentos prioritários ────────────────────────────────────────────────────
+
+section("Segmentos de ação", "Listas detalhadas de clientes por segmento. Use para revisar manualmente ou exportar para campanhas.")
+
+TENURE_GRUPOS = {
+    "Toda a base":                   "",
+    "Recentes — últimos 18 meses":   "AND tenure_code IN ('T1','T2','T3')",
+    "Intermediárias — 2022 a 2024":  "AND tenure_code IN ('T4','T5')",
+    "Base antiga — 2020 a 2021":     "AND tenure_code IN ('T6','T7','T8')",
+}
+tenure_filtro_label = st.selectbox(
+    "Recorte por antiguidade",
+    list(TENURE_GRUPOS.keys()),
+    help="Filtra os segmentos abaixo por quanto tempo a cliente está na base",
+)
+tenure_filtro = TENURE_GRUPOS[tenure_filtro_label]
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "💎 VIPs",
+    "🧊 Esfriando (alto valor)",
+    "💘 Segundo pedido",
+    "🌤 Morno",
+    "⏸️ Em Pausa",
+    "❄️ Gelando (alto valor)",
+    "👻 Ghosting",
+])
+
+_cfg_seg_r = {
+    "gasto_total":  st.column_config.NumberColumn("gasto_total",  format="R$ %,.0f"),
+    "ticket_medio": st.column_config.NumberColumn("ticket_medio", format="R$ %,.0f"),
+    "pedidos":      st.column_config.NumberColumn("pedidos",      format="%d"),
+    "score":        st.column_config.NumberColumn("score",        format="%d"),
+}
+
+with tab1:
+    st.caption("Clientes que gastaram R$ 5.000+ no total. Tratamento VIP — não perder por nada.")
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               ROUND(avg_ticket,0) ticket_medio, last_order_date ultima_compra,
+               tenure_label antiguidade, score, score_label
+        FROM crm_profiles
+        WHERE valor_code = 'V1' {tenure_filtro}
+        ORDER BY score DESC
+    """)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab2:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, recencia_label temperatura,
+               tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3') {tenure_filtro}
+        ORDER BY total_spent DESC
+    """)
+    st.caption(f"{len(df)} clientes com histórico relevante (R$500+) que não compram há 181–270 dias.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab3:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE frequencia_code = 'F1' AND recencia_code = 'R1' {tenure_filtro}
+        ORDER BY total_spent DESC
+    """)
+    st.caption(f"{len(df)} clientes que fizeram 1 pedido nos últimos 90 dias — a 2ª compra é o maior preditor de fidelização.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab4:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               frequencia_label frequencia,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, recencia_label recencia,
+               tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE status_code = 'S3' {tenure_filtro}
+        ORDER BY total_spent DESC
+    """)
+    st.caption(f"{len(df)} clientes com 1 compra há 3–6 meses. Ainda não voltaram — janela de conversão aberta.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab5:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               frequencia_label frequencia,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, recencia_label recencia,
+               tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE status_code = 'S7' {tenure_filtro}
+        ORDER BY total_spent DESC
+    """)
+    st.caption(f"{len(df)} clientes com 2+ compras que pausaram há 3–9 meses. Têm histórico real — maior chance de reativação.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab6:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               orders_count pedidos, ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE status_code = 'S5' AND valor_code IN ('V1','V2') {tenure_filtro}
+        ORDER BY total_spent DESC
+    """)
+    st.caption(f"{len(df)} clientes de alto valor (R$2.500+) gelando há 9 meses–1 ano+ — campanha win-back.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
+
+with tab7:
+    df = query(f"""
+        SELECT first_name || ' ' || last_name nome, email,
+               ROUND(total_spent,0) gasto_total,
+               last_order_date ultima_compra, recencia_label recencia,
+               tenure_label antiguidade, score
+        FROM crm_profiles
+        WHERE status_code = 'S6' {tenure_filtro}
+        ORDER BY total_spent DESC, last_order_date DESC
+    """)
+    st.caption(f"{len(df)} clientes que compraram exatamente 1 vez e sumiram há mais de 6 meses. Segmento de reativação em massa.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 st.divider()
 
