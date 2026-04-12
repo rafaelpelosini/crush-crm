@@ -295,7 +295,7 @@ if not df_vendas.empty:
     v1, v2, v3, v4 = st.columns(4)
     v1.metric("Ontem",       f"R$ {v_ontem:,.0f}",  _delta_pct(v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"))
     v2.metric("Hoje",        f"R$ {v_hoje:,.0f}",   _delta_pct(v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"))
-    v3.metric("Esta semana (WTD)", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant, label_sem_ant))
+    v3.metric("Esta semana", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant, label_sem_ant))
     v4.metric(f"Este mês (1–{hoje.day}/{hoje.month})", f"R$ {v_mes:,.0f}", _delta_pct(v_mes, v_mes_ant, label_mes_ant))
 
     st.markdown(
@@ -635,9 +635,12 @@ with tab_a:
 
 st.markdown("""
 <div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
-<b>Status</b> — frequência · estágio da relação &nbsp;·&nbsp;
-<b>Valor</b> — segmento financeiro: 💎 VIP/Chegou arrasando &nbsp;·&nbsp; 🔥 Alto/Chegou muito bem &nbsp;·&nbsp; 🍷 Médio/Chegou bem &nbsp;·&nbsp; 🙂 Baixo/Chegou de boa<br>
-<b>Frequência</b> — intervalo médio entre compras: 🟢 ≤30 dias &nbsp;·&nbsp; 🟡 31–60 dias &nbsp;·&nbsp; 🔴 +60 dias
+<b>Status</b> — frequência de compra · estágio da relação (ex: Date — Novo Crush) &nbsp;·&nbsp;
+<b>Valor</b> — 💎 VIP/Chegou arrasando &nbsp;·&nbsp; 🔥 Alto/Chegou muito bem &nbsp;·&nbsp; 🍷 Médio/Chegou bem &nbsp;·&nbsp; 🙂 Baixo/Chegou de boa<br>
+<b>Frequência</b> — intervalo médio entre compras:
+🟢 ≤30 dias (alta frequência, ex: R$300 ticket → R$3.600/ano) &nbsp;·&nbsp;
+🟡 31–60 dias (média frequência, ex: R$300 ticket → R$1.800/ano) &nbsp;·&nbsp;
+🔴 +60 dias (baixa frequência, ex: R$300 ticket → R$900/ano ou menos)
 </div>
 """, unsafe_allow_html=True)
 
@@ -679,32 +682,39 @@ pivot_r = pivot_r[_valor_cols]
 
 _col_names = [_valor_labels[v].split("/")[0].strip() for v in _valor_cols]
 
-def _build_pivot(raw, fmt_fn):
+def _build_pivot(raw, numeric=False):
     p = raw.copy()
     p["Total"] = p.sum(axis=1)
     p = p.reset_index()
-    p["_ord"] = p["status_code"].map(_status_ord)
-    p = p.sort_values("_ord").drop(columns="_ord")
+    p["#"] = p["status_code"].map(_status_ord)
+    p = p.sort_values("#")
     p["Status"] = p["status_code"].map(_status_labels)
-    p = p[["Status"] + _valor_cols + ["Total"]]
-    p.columns = ["Status"] + _col_names + ["Total"]
-    for col in _col_names + ["Total"]:
-        p[col] = p[col].apply(fmt_fn)
+    p = p[["#", "Status"] + _valor_cols + ["Total"]]
+    p.columns = ["#", "Status"] + _col_names + ["Total"]
+    if not numeric:
+        for col in _col_names + ["Total"]:
+            p[col] = p[col].apply(lambda x: int(x) if x > 0 else 0)
     return p
 
-def _fmt_n(x):   return int(x) if x > 0 else 0
-def _fmt_r(x):
-    if x == 0: return "—"
-    x = float(x)
-    if x >= 1_000_000: return f"R$ {x/1_000_000:.1f}M"
-    if x >= 1_000:     return f"R$ {x/1_000:.0f}k"
-    return f"R$ {x:.0f}"
-
 tab_sv_n, tab_sv_r = st.tabs(["👥 Clientes", "💰 Receita"])
+
+_receita_cfg = {c: st.column_config.NumberColumn(c, format="R$ %d") for c in _col_names + ["Total"]}
+
 with tab_sv_n:
-    st.dataframe(_build_pivot(pivot_n, _fmt_n), hide_index=True, use_container_width=True)
+    st.dataframe(
+        _build_pivot(pivot_n),
+        hide_index=True, use_container_width=True,
+        column_config={"#": st.column_config.NumberColumn("#", width="small")}
+    )
 with tab_sv_r:
-    st.dataframe(_build_pivot(pivot_r, _fmt_r), hide_index=True, use_container_width=True)
+    p_r = _build_pivot(pivot_r, numeric=True)
+    for col in _col_names + ["Total"]:
+        p_r[col] = p_r[col].apply(lambda x: float(x))
+    st.dataframe(
+        p_r,
+        hide_index=True, use_container_width=True,
+        column_config={"#": st.column_config.NumberColumn("#", width="small"), **_receita_cfg}
+    )
 
 st.markdown("""
 <div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
