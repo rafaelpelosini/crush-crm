@@ -427,10 +427,10 @@ else:
     df_hist["De"]              = df_hist["prev_status"].map(STATUS_LABEL).fillna(df_hist["prev_status"])
     df_hist["Para"]            = df_hist["frequencia_label"] + " — " + df_hist["status_code"].map(STATUS_LABEL).fillna(df_hist["status_code"])
     df_hist["Score Δ"]         = (df_hist["score"] - df_hist["prev_score"]).apply(lambda x: f"+{x}" if x > 0 else str(x))
-    df_hist["Pedidos"]         = df_hist["orders_count"]
-    df_hist["Ticket médio"]    = df_hist["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Últ. valor"]      = df_hist["ultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
-    df_hist["Penúlt. valor"]   = df_hist["penultima_compra"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+    df_hist["Pedidos"]         = df_hist["orders_count"].astype(int)
+    df_hist["Ticket médio"]    = df_hist["avg_ticket"].apply(lambda x: float(x) if x else 0.0)
+    df_hist["Últ. valor"]      = df_hist["ultima_compra"].apply(lambda x: float(x) if x else 0.0)
+    df_hist["Penúlt. valor"]   = df_hist["penultima_compra"].apply(lambda x: float(x) if x else 0.0)
     df_hist["Cadastro"]        = pd.to_datetime(df_hist["registration_date"]).dt.strftime("%d/%m/%Y")
     df_hist["Frequência"]      = df_hist["avg_days_between"].apply(freq_icon)
     df_hist["Categoria"]       = df_hist["categoria_preferida"].fillna("—")
@@ -450,6 +450,12 @@ else:
     br()
 
     _cols_hist = ["Cliente","Cadastro","Últ. compra","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. valor","Penúlt. valor","Data"]
+    _cfg_hist = {
+        "Pedidos":       st.column_config.NumberColumn("Pedidos",       format="%d"),
+        "Ticket médio":  st.column_config.NumberColumn("Ticket médio",  format="R$ %,.0f"),
+        "Últ. valor":    st.column_config.NumberColumn("Últ. valor",    format="R$ %,.0f"),
+        "Penúlt. valor": st.column_config.NumberColumn("Penúlt. valor", format="R$ %,.0f"),
+    }
 
     tab_m, tab_p = st.tabs([f"🟢 Melhoraram ({melhorou})", f"🔴 Pioraram ({piorou})"])
     with tab_m:
@@ -457,13 +463,13 @@ else:
         if df_m.empty:
             st.info("Nenhuma melhora neste sync.")
         else:
-            st.dataframe(df_m[_cols_hist], hide_index=True, use_container_width=True)
+            st.dataframe(df_m[_cols_hist], hide_index=True, use_container_width=True, column_config=_cfg_hist)
     with tab_p:
         df_p = df_hist[df_hist["Movimento"] == "🔴 Piorou"]
         if df_p.empty:
             st.info("Nenhuma piora neste sync.")
         else:
-            st.dataframe(df_p[_cols_hist], hide_index=True, use_container_width=True)
+            st.dataframe(df_p[_cols_hist], hide_index=True, use_container_width=True, column_config=_cfg_hist)
 
 st.divider()
 
@@ -598,10 +604,10 @@ br()
 def _fmt_nc(df):
     df = df.copy()
     df["Cliente"]        = df["first_name"] + " " + df["last_name"]
-    df["Receita período"]= df["rec_periodo"].apply(lambda x: f"R$ {float(x):,.0f}" if x else "—")
+    df["Receita período"]= df["rec_periodo"].apply(lambda x: float(x) if x else 0.0)
     if "last_order_value" in df.columns:
-        df["Últ. pedido R$"] = df["last_order_value"].apply(lambda x: f"R$ {float(x):,.0f}" if x else "—")
-    df["Ticket médio"]   = df["avg_ticket"].apply(lambda x: f"R$ {x:,.0f}" if x else "—")
+        df["Últ. pedido R$"] = df["last_order_value"].apply(lambda x: float(x) if x else 0.0)
+    df["Ticket médio"]   = df["avg_ticket"].apply(lambda x: float(x) if x else 0.0)
     df["Frequência"]     = df["avg_days_between"].apply(freq_icon)
     df["Status"]         = df["frequencia_label"] + " — " + df["status_label"]
     df["Valor"]          = df["valor_label"]
@@ -620,7 +626,12 @@ with tab_n:
         df_fmt["Cadastro"] = pd.to_datetime(df_fmt["registration_date"]).dt.strftime("%d/%m/%Y")
         st.dataframe(
             df_fmt[["Cliente","Cadastro","Últ. pedido","orders_count","Receita período","Ticket médio","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
-            hide_index=True, use_container_width=True
+            hide_index=True, use_container_width=True,
+            column_config={
+                "Pedidos":        st.column_config.NumberColumn("Pedidos",        format="%d"),
+                "Receita período":st.column_config.NumberColumn("Receita período",format="R$ %,.0f"),
+                "Ticket médio":   st.column_config.NumberColumn("Ticket médio",   format="R$ %,.0f"),
+            }
         )
 
 with tab_a:
@@ -630,7 +641,12 @@ with tab_a:
         df_fmt = _fmt_nc(df_antigos_nc)
         st.dataframe(
             df_fmt[["Cliente","Últ. pedido","orders_count","Últ. pedido R$","Ticket médio","Frequência","Categoria","Tamanho","Status","Valor"]].rename(columns={"orders_count":"Pedidos"}),
-            hide_index=True, use_container_width=True
+            hide_index=True, use_container_width=True,
+            column_config={
+                "Pedidos":      st.column_config.NumberColumn("Pedidos",      format="%d"),
+                "Últ. pedido R$":st.column_config.NumberColumn("Últ. pedido R$",format="R$ %,.0f"),
+                "Ticket médio": st.column_config.NumberColumn("Ticket médio", format="R$ %,.0f"),
+            }
         )
 
 st.markdown("""
@@ -750,7 +766,7 @@ _tenure_ord = {"T1":1,"T2":2,"T3":3,"T4":4,"T5":5,"T6":6,"T7":7,"T8":8}
 df_tenure_tbl = df_tenure.copy()
 df_tenure_tbl["_ord"] = df_tenure_tbl["code"].map(_tenure_ord)
 df_tenure_tbl = df_tenure_tbl.sort_values("_ord").drop(columns="_ord")
-df_tenure_tbl["Clientes"] = df_tenure_tbl["n"].apply(lambda x: f"{x:,}".replace(",","."))
+df_tenure_tbl["Clientes"] = df_tenure_tbl["n"].astype(int)
 df_tenure_tbl["%"] = df_tenure_tbl["pct"].apply(lambda x: f"{x:.1f}%")
 
 _tenure_range = {
@@ -766,7 +782,8 @@ _tenure_range = {
 df_tenure_tbl["Período"] = df_tenure_tbl["code"].map(_tenure_range)
 st.dataframe(
     df_tenure_tbl[["code","label","Período","Clientes","%"]].rename(columns={"code":"Código","label":"Fase"}),
-    hide_index=True, use_container_width=True
+    hide_index=True, use_container_width=True,
+    column_config={"Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f")}
 )
 
 st.divider()
@@ -936,6 +953,13 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "👻 Ghosting",
 ])
 
+_cfg_seg_r = {
+    "gasto_total":  st.column_config.NumberColumn("gasto_total",  format="R$ %,.0f"),
+    "ticket_medio": st.column_config.NumberColumn("ticket_medio", format="R$ %,.0f"),
+    "pedidos":      st.column_config.NumberColumn("pedidos",      format="%d"),
+    "score":        st.column_config.NumberColumn("score",        format="%d"),
+}
+
 with tab1:
     st.caption("Clientes que gastaram R$ 5.000+ no total. Tratamento VIP — não perder por nada.")
     df = query(f"""
@@ -947,7 +971,7 @@ with tab1:
         WHERE valor_code = 'V1' {tenure_filtro}
         ORDER BY score DESC
     """)
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab2:
     df = query(f"""
@@ -960,7 +984,7 @@ with tab2:
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes com histórico relevante (R$500+) que não compram há 181–270 dias.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab3:
     df = query(f"""
@@ -972,7 +996,7 @@ with tab3:
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes que fizeram 1 pedido nos últimos 90 dias — a 2ª compra é o maior preditor de fidelização.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab4:
     df = query(f"""
@@ -986,7 +1010,7 @@ with tab4:
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes com 1 compra há 3–6 meses. Ainda não voltaram — janela de conversão aberta.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab5:
     df = query(f"""
@@ -1000,7 +1024,7 @@ with tab5:
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes com 2+ compras que pausaram há 3–9 meses. Têm histórico real — maior chance de reativação.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab6:
     df = query(f"""
@@ -1012,7 +1036,7 @@ with tab6:
         ORDER BY total_spent DESC
     """)
     st.caption(f"{len(df)} clientes de alto valor (R$2.500+) gelando há 9 meses–1 ano+ — campanha win-back.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 with tab7:
     df = query(f"""
@@ -1025,7 +1049,7 @@ with tab7:
         ORDER BY total_spent DESC, last_order_date DESC
     """)
     st.caption(f"{len(df)} clientes que compraram exatamente 1 vez e sumiram há mais de 6 meses. Segmento de reativação em massa.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=_cfg_seg_r)
 
 st.divider()
 
@@ -1071,10 +1095,15 @@ else:
         st.plotly_chart(fig_top, use_container_width=True)
 
         df_top_fmt = df_top.copy()
-        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(lambda x: f"R$ {x:,.0f}")
-        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(lambda x: f"R$ {x:,.0f}")
+        df_top_fmt["receita"]     = df_top_fmt["receita"].apply(float)
+        df_top_fmt["ticket_unit"] = df_top_fmt["ticket_unit"].apply(float)
         df_top_fmt.columns        = ["Produto", "Pedidos", "Unidades", "Receita", "Ticket unit."]
-        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True)
+        st.dataframe(df_top_fmt, hide_index=True, use_container_width=True, column_config={
+            "Receita":     st.column_config.NumberColumn("Receita",     format="R$ %,.0f"),
+            "Ticket unit.":st.column_config.NumberColumn("Ticket unit.",format="R$ %,.0f"),
+            "Pedidos":     st.column_config.NumberColumn("Pedidos",     format="%,.0f"),
+            "Unidades":    st.column_config.NumberColumn("Unidades",    format="%,.0f"),
+        })
 
     with pt2:
         df_vip_prod = query(f"""
@@ -1093,9 +1122,13 @@ else:
             LIMIT 20
         """)
         st.caption("Produtos mais comprados pelas clientes de alto valor (VIP e Alto Valor)")
-        df_vip_prod["receita"] = df_vip_prod["receita"].apply(lambda x: f"R$ {x:,.0f}")
+        df_vip_prod["receita"] = df_vip_prod["receita"].apply(float)
         df_vip_prod.columns    = ["Produto", "Pedidos", "Unidades", "Receita"]
-        st.dataframe(df_vip_prod, hide_index=True, use_container_width=True)
+        st.dataframe(df_vip_prod, hide_index=True, use_container_width=True, column_config={
+            "Receita":  st.column_config.NumberColumn("Receita",  format="R$ %,.0f"),
+            "Pedidos":  st.column_config.NumberColumn("Pedidos",  format="%,.0f"),
+            "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
+        })
 
     with pt3:
         df_seg2 = query(f"""
@@ -1114,9 +1147,13 @@ else:
             LIMIT 20
         """)
         st.caption("Produtos comprados por clientes que fizeram 2+ pedidos — indicam o que gera recorrência")
-        df_seg2["receita"] = df_seg2["receita"].apply(lambda x: f"R$ {x:,.0f}")
+        df_seg2["receita"] = df_seg2["receita"].apply(float)
         df_seg2.columns    = ["Produto", "Clientes", "Unidades", "Receita"]
-        st.dataframe(df_seg2, hide_index=True, use_container_width=True)
+        st.dataframe(df_seg2, hide_index=True, use_container_width=True, column_config={
+            "Receita":  st.column_config.NumberColumn("Receita",  format="R$ %,.0f"),
+            "Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f"),
+            "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
+        })
 
 st.divider()
 
@@ -1150,7 +1187,8 @@ for nome, (filtro, descricao) in SEGMENTS_DASH.items():
     seg_info.append({"Audiência": nome, "Clientes": int(n), "Descrição": descricao})
 
 df_seg = pd.DataFrame(seg_info)
-st.dataframe(df_seg, hide_index=True, use_container_width=True)
+st.dataframe(df_seg, hide_index=True, use_container_width=True,
+             column_config={"Clientes": st.column_config.NumberColumn("Clientes", format="%,.0f")})
 
 st.markdown("**Baixar audiência:**")
 escolha = st.selectbox("", list(SEGMENTS_DASH.keys()), label_visibility="collapsed")
