@@ -1065,10 +1065,9 @@ if df_items_exist == 0:
 else:
     STRIP_SIZE = "regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{1,3}$', '')"
 
-    pt1, pt2, pt3, pt4 = st.tabs([
+    pt1, pt2, pt3 = st.tabs([
         "🎯 Conversão por categoria",
         "🗂️ Mix por segmento",
-        "💎 Preferidos dos VIPs",
         "⚓ Produtos âncora",
     ])
 
@@ -1182,34 +1181,8 @@ Ghosting tem proporcionalmente mais Bolsas — pode indicar produto de impulso s
             fig_mix.update_traces(texttemplate="%{z:.1f}%")
             st.plotly_chart(fig_mix, use_container_width=True)
 
-    # ── Tab 3: Preferidos dos VIPs ────────────────────────────────────────────
+    # ── Tab 3: Produtos âncora ────────────────────────────────────────────────
     with pt3:
-        df_vip_prod = query(f"""
-            SELECT {STRIP_SIZE} AS produto,
-                   COUNT(DISTINCT i.order_id)      pedidos,
-                   SUM(i.quantity)                 unidades,
-                   ROUND(SUM(i.total)::numeric, 0) receita
-            FROM order_items i
-            JOIN orders o ON o.woo_id = i.order_id
-            JOIN crm_profiles p ON p.customer_id = o.customer_id
-            WHERE p.valor_code IN ('V1','V2')
-              AND o.status NOT IN ('cancelled','refunded','failed')
-              AND i.product_name != ''
-            GROUP BY {STRIP_SIZE}
-            ORDER BY receita DESC
-            LIMIT 20
-        """)
-        st.caption("Produtos mais comprados pelas clientes de alto valor (VIP e Alto Valor)")
-        df_vip_prod["receita"] = df_vip_prod["receita"].apply(float)
-        df_vip_prod.columns    = ["Produto", "Pedidos", "Unidades", "Receita"]
-        st.dataframe(df_vip_prod, hide_index=True, use_container_width=True, column_config={
-            "Receita":  st.column_config.NumberColumn("Receita",  format="R$ %,.0f"),
-            "Pedidos":  st.column_config.NumberColumn("Pedidos",  format="%,.0f"),
-            "Unidades": st.column_config.NumberColumn("Unidades", format="%,.0f"),
-        })
-
-    # ── Tab 4: Produtos âncora ────────────────────────────────────────────────
-    with pt4:
         df_ancora = query(f"""
             WITH geral AS (
                 SELECT {STRIP_SIZE} AS produto,
