@@ -682,7 +682,16 @@ pivot_r = pivot_r[_valor_cols]
 
 _col_names = [_valor_labels[v].split("/")[0].strip() for v in _valor_cols]
 
-def _build_pivot(raw, numeric=False):
+def _fmt_brl_n(x):
+    return f"{int(x):,}".replace(",", ".") if x > 0 else "0"
+
+def _fmt_brl_r(x):
+    x = float(x)
+    if x == 0:         return "—"
+    if x >= 1_000_000: return f"R$ {x/1_000_000:.1f}M"
+    return f"R$ {x:,.0f}".replace(",", ".")
+
+def _build_pivot_str(raw, fmt_fn):
     p = raw.copy()
     p["Total"] = p.sum(axis=1)
     p = p.reset_index()
@@ -691,30 +700,17 @@ def _build_pivot(raw, numeric=False):
     p["Status"] = p["status_code"].map(_status_labels)
     p = p[["#", "Status"] + _valor_cols + ["Total"]]
     p.columns = ["#", "Status"] + _col_names + ["Total"]
-    if not numeric:
-        for col in _col_names + ["Total"]:
-            p[col] = p[col].apply(lambda x: int(x) if x > 0 else 0)
+    for col in _col_names + ["Total"]:
+        p[col] = p[col].apply(fmt_fn)
     return p
 
 tab_sv_n, tab_sv_r = st.tabs(["👥 Clientes", "💰 Receita"])
-
-_receita_cfg = {c: st.column_config.NumberColumn(c, format="R$ %d") for c in _col_names + ["Total"]}
-
 with tab_sv_n:
-    st.dataframe(
-        _build_pivot(pivot_n),
-        hide_index=True, use_container_width=True,
-        column_config={"#": st.column_config.NumberColumn("#", width="small")}
-    )
+    st.dataframe(_build_pivot_str(pivot_n, _fmt_brl_n), hide_index=True, use_container_width=True,
+                 column_config={"#": st.column_config.NumberColumn("#", width="small")})
 with tab_sv_r:
-    p_r = _build_pivot(pivot_r, numeric=True)
-    for col in _col_names + ["Total"]:
-        p_r[col] = p_r[col].apply(lambda x: float(x))
-    st.dataframe(
-        p_r,
-        hide_index=True, use_container_width=True,
-        column_config={"#": st.column_config.NumberColumn("#", width="small"), **_receita_cfg}
-    )
+    st.dataframe(_build_pivot_str(pivot_r, _fmt_brl_r), hide_index=True, use_container_width=True,
+                 column_config={"#": st.column_config.NumberColumn("#", width="small")})
 
 st.markdown("""
 <div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
@@ -726,13 +722,13 @@ st.markdown("""
 👀 <b>Observador</b> — nunca comprou
 <br><br>
 <b>Linhas — Status da Relação</b><br>
-💍 <b>Fiel</b> — recorrente ativa &nbsp;·&nbsp;
+💍 <b>Fiel</b> — 2+ compras, última nos últimos 180 dias &nbsp;·&nbsp;
 💘 <b>Novo Crush</b> — 1ª compra nos últimos 90 dias &nbsp;·&nbsp;
-🌤 <b>Morno</b> — 1 compra há 3–6 meses &nbsp;·&nbsp;
-⏸️ <b>Em Pausa</b> — 2+ compras, parou há 3–9 meses &nbsp;·&nbsp;
-🧊 <b>Esfriando</b> — sumindo há 6–9 meses &nbsp;·&nbsp;
-❄️ <b>Gelando</b> — sumindo há 9–12 meses &nbsp;·&nbsp;
-👻 <b>Ghosting</b> — 1 compra e sumiu &nbsp;·&nbsp;
+🌤 <b>Morno</b> — exatamente 1 compra, feita há 3–6 meses &nbsp;·&nbsp;
+⏸️ <b>Em Pausa</b> — 2+ compras, última há 3–9 meses &nbsp;·&nbsp;
+🧊 <b>Esfriando</b> — 2+ compras, última há 6–9 meses &nbsp;·&nbsp;
+❄️ <b>Gelando</b> — 2+ compras, última há 9–12 meses &nbsp;·&nbsp;
+👻 <b>Ghosting</b> — exatamente 1 compra, feita há +6 meses &nbsp;·&nbsp;
 👀 <b>Só olhando</b> — nunca comprou
 </div>
 """, unsafe_allow_html=True)
