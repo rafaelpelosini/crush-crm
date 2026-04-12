@@ -125,6 +125,16 @@ def init():
             CREATE INDEX IF NOT EXISTS idx_orders_cust ON orders(customer_id);
             CREATE INDEX IF NOT EXISTS idx_hist_cust   ON profile_history(customer_id);
             CREATE INDEX IF NOT EXISTS idx_hist_sync   ON profile_history(synced_at);
+
+            CREATE TABLE IF NOT EXISTS insights_history (
+                id          SERIAL PRIMARY KEY,
+                synced_at   TEXT NOT NULL,
+                key         TEXT NOT NULL,
+                value_num   NUMERIC,
+                value_text  TEXT,
+                UNIQUE(synced_at, key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_insights_sync ON insights_history(synced_at);
         """)
         # Migrações incrementais — colunas adicionadas após criação inicial
         cur.execute("""
@@ -261,6 +271,165 @@ def save_profile_history(conn, rows: list[dict], synced_at: str):
         print(f"  {len(changed)} mudanças registradas no histórico")
     else:
         print("  Nenhuma mudança de classificação desde o último sync")
+
+
+def save_insights_snapshot(conn, synced_at: str):
+    """Calcula e persiste snapshot das métricas-chave em insights_history."""
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur2 = conn.cursor()
+    SQ   = "status NOT IN ('cancelled','refunded','failed')"
+    STRIP = "regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{1,3}$', '')"
+
+    def _save(key, num, txt=None):
+        cur2.execute("""
+            INSERT INTO insights_history (synced_at, key, value_num, value_text)
+            VALUES (%s,%s,%s,%s)
+            ON CONFLICT (synced_at, key) DO UPDATE
+              SET value_num=EXCLUDED.value_num, value_text=EXCLUDED.value_text
+        """, (synced_at, key, num, txt))
+
+    # ghosting_rate
+    cur.execute("""
+        SELECT ROUND(100.0*COUNT(CASE WHEN status_code='S6' THEN 1 END)
+               /NULLIF(COUNT(CASE WHEN orders_count>=1 THEN 1 END),0),1) v
+        FROM crm_profiles WHERE orders_count>=1
+    """)
+    r = cur.fetchone(); _save("ghosting_rate", r["v"])
+
+    # janela_ouro — mediana de dias até 2ª compra
+    cur.execute(f"""
+        WITH ord AS (
+            SELECT customer_id, date_created::date d,
+                   ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY date_created) rn
+            FROM orders WHERE {SQ}
+        )
+        SELECT ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP
+               (ORDER BY (o2.d-o1.d)::numeric)) v
+        FROM ord o1 JOIN ord o2
+          ON o2.customer_id=o1.customer_id AND o2.rn=2
+        WHERE o1.rn=1
+    """)
+    r = cur.fetchone(); _save("janela_ouro", r["v"] if r and r["v"] is not None else 0)
+
+    # concentracao_top10
+    cur.execute("""
+        WITH rk AS (
+            SELECT total_spent, NTILE(10) OVER (ORDER BY total_spent DESC) d
+            FROM crm_profiles WHERE orders_count>0
+        )
+        SELECT ROUND(100.0*SUM(CASE WHEN d=1 THEN total_spent ELSE 0 END)
+               /NULLIF(SUM(total_spent),0),1) v FROM rk
+    """)
+    r = cur.fetchone(); _save("concentracao_top10", r["v"])
+
+    # pct_receita_2anos
+    cur.execute("""
+        SELECT ROUND(100.0*SUM(CASE WHEN tenure_code IN('T5','T6','T7','T8')
+               THEN total_spent ELSE 0 END)/NULLIF(SUM(total_spent),0),1) v
+        FROM crm_profiles WHERE orders_count>0
+    """)
+    r = cur.fetchone(); _save("pct_receita_2anos", r["v"])
+
+    # adormecido (clientes esfriando/gelando com alto valor)
+    cur.execute("""
+        SELECT COUNT(*) n, ROUND(SUM(total_spent)::numeric,0) rs
+        FROM crm_profiles
+        WHERE status_code IN('S4','S5') AND valor_code IN('V1','V2','V3')
+    """)
+    r = cur.fetchone(); _save("adormecido_n", r["n"]); _save("adormecido_rs", r["rs"])
+
+    # pct_compra_1mes
+    cur.execute(f"""
+        WITH pc AS (
+            SELECT o.customer_id, MIN(o.date_created::date) d
+            FROM orders o WHERE o.{SQ} GROUP BY o.customer_id
+        )
+        SELECT ROUND(100.0*COUNT(CASE WHEN (pc.d-c.registration_date::date)<=30 THEN 1 END)
+               /NULLIF(COUNT(*),0),1) v
+        FROM pc JOIN customers c ON c.woo_id=pc.customer_id
+        WHERE c.registration_date IS NOT NULL AND c.registration_date!=''
+    """)
+    r = cur.fetchone(); _save("pct_compra_1mes", r["v"])
+
+    # reativadas
+    cur.execute("""
+        SELECT COUNT(DISTINCT ph.customer_id) v FROM profile_history ph
+        WHERE ph.status_code IN('S5','S6')
+          AND EXISTS(SELECT 1 FROM crm_profiles cp
+                     WHERE cp.customer_id=ph.customer_id
+                       AND cp.status_code IN('S1','S2'))
+    """)
+    r = cur.fetchone(); _save("reativadas", r["v"])
+
+    # media_pedidos_vip / geral
+    cur.execute("""
+        SELECT ROUND(AVG(CASE WHEN valor_code='V1' THEN orders_count END)::numeric,2) vip,
+               ROUND(AVG(orders_count)::numeric,2) geral
+        FROM crm_profiles WHERE orders_count>0
+    """)
+    r = cur.fetchone(); _save("media_pedidos_vip", r["vip"]); _save("media_pedidos_geral", r["geral"])
+
+    # top categoria de conversão (value_text = nome da categoria)
+    cur.execute(f"""
+        WITH pc AS (
+            SELECT o.customer_id, i.category,
+                   ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+            FROM orders o JOIN order_items i ON i.order_id=o.woo_id
+            WHERE o.{SQ} AND i.category IS NOT NULL AND i.category!=''
+        )
+        SELECT pc.category,
+               ROUND(100.0*COUNT(DISTINCT CASE WHEN p.orders_count>=2 THEN pc.customer_id END)
+                     /NULLIF(COUNT(DISTINCT pc.customer_id),0),1) pct
+        FROM pc JOIN crm_profiles p ON p.customer_id=pc.customer_id WHERE pc.rn=1
+        GROUP BY pc.category HAVING COUNT(DISTINCT pc.customer_id)>=30
+        ORDER BY pct DESC LIMIT 1
+    """)
+    r = cur.fetchone()
+    if r: _save("top_conv_pct", r["pct"], r["category"])
+
+    # top categoria ghosting
+    cur.execute(f"""
+        WITH pc AS (
+            SELECT o.customer_id, i.category,
+                   ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+            FROM orders o JOIN order_items i ON i.order_id=o.woo_id
+            WHERE o.{SQ} AND i.category IS NOT NULL AND i.category!=''
+        )
+        SELECT pc.category,
+               ROUND(100.0*COUNT(DISTINCT CASE WHEN p.status_code='S6' THEN pc.customer_id END)
+                     /NULLIF(COUNT(DISTINCT pc.customer_id),0),0) pct
+        FROM pc JOIN crm_profiles p ON p.customer_id=pc.customer_id WHERE pc.rn=1
+        GROUP BY pc.category HAVING COUNT(DISTINCT pc.customer_id)>=30
+        ORDER BY pct DESC LIMIT 1
+    """)
+    r = cur.fetchone()
+    if r: _save("top_ghost_pct", r["pct"], r["category"])
+
+    # ticket 1ª compra: VIPs vs ghostings
+    cur.execute(f"""
+        WITH po AS (
+            SELECT o.customer_id, o.total,
+                   ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+            FROM orders o WHERE o.{SQ} AND o.total>0
+        )
+        SELECT ROUND(AVG(CASE WHEN p.valor_code='V1' THEN po.total END)::numeric,0) vip,
+               ROUND(AVG(CASE WHEN p.status_code='S6' THEN po.total END)::numeric,0) ghost
+        FROM po JOIN crm_profiles p ON p.customer_id=po.customer_id WHERE po.rn=1
+    """)
+    r = cur.fetchone()
+    if r: _save("ticket_vip_1a", r["vip"]); _save("ticket_ghost_1a", r["ghost"])
+
+    # score médio e ticket médio
+    cur.execute("SELECT ROUND(AVG(score)::numeric,1) v FROM crm_profiles WHERE orders_count>0")
+    r = cur.fetchone(); _save("score_medio", r["v"])
+
+    cur.execute(f"SELECT ROUND(AVG(total)::numeric,0) v FROM orders WHERE {SQ} AND total>0")
+    r = cur.fetchone(); _save("ticket_medio_geral", r["v"])
+
+    cur.execute("SELECT COUNT(*) v FROM crm_profiles WHERE orders_count>0")
+    r = cur.fetchone(); _save("total_compradoras", r["v"])
+
+    print(f"  Snapshot de {len([k for k in ['ghosting_rate','janela_ouro','concentracao_top10','pct_receita_2anos','adormecido_n','adormecido_rs','pct_compra_1mes','reativadas','media_pedidos_vip','media_pedidos_geral','top_conv_pct','top_ghost_pct','ticket_vip_1a','ticket_ghost_1a','score_medio','ticket_medio_geral','total_compradoras']])} métricas salvo em insights_history")
 
 
 def get_last_sync() -> str | None:

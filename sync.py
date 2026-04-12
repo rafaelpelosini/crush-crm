@@ -186,6 +186,11 @@ def run_sync(full: bool = False):
 
     print(f"  {len(profile_rows)} perfis CRM atualizados\n")
 
+    print("▶ Salvando snapshot de insights...")
+    with db.connect() as conn:
+        db.save_insights_snapshot(conn, now)
+    print()
+
     # ── 4. Exporta audiências ─────────────────────────────────────────────
     print("▶ Exportando audiências...\n")
     export.export_all()
@@ -292,6 +297,11 @@ def run_reclassify():
         db.save_profile_history(conn, profile_rows, now)
 
     print(f"  {len(profile_rows)} perfis CRM atualizados\n")
+
+    print("▶ Salvando snapshot de insights...")
+    with db.connect() as conn:
+        db.save_insights_snapshot(conn, now)
+    print()
 
     print("▶ Exportando audiências...\n")
     export.export_all()
