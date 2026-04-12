@@ -270,9 +270,17 @@ if not df_vendas.empty:
     v_mes,    c_mes,    p_mes,    t_mes    = stats(df_vendas, ini_mes,      hoje)
     v_ontem_ref = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].sum()
     v_hoje_ref  = filtrar(df_vendas, hoje_sem_ant,  hoje_sem_ant)["total"].sum()
-    v_sem_ant   = filtrar(df_vendas, ini_semana_ant, fim_semana_ant)["total"].sum()
+    # Esta semana: WTD vs WTD semana passada (mesmo nº de dias)
+    ini_semana_ref_wtd = ini_semana - timedelta(weeks=1)
+    fim_semana_ref_wtd = ini_semana - timedelta(days=1) if hoje == ini_semana else ini_semana - timedelta(weeks=1) + timedelta(days=(hoje - ini_semana).days)
+    v_sem_ant   = filtrar(df_vendas, ini_semana_ref_wtd, fim_semana_ref_wtd)["total"].sum()
+    label_sem_ant = f"vs {ini_semana_ref_wtd.strftime('%d/%m')}–{fim_semana_ref_wtd.strftime('%d/%m')}"
     v_mes_ant   = filtrar(df_vendas, ini_mes_ant, fim_mes_ant_equiv)["total"].sum()
     _,_,_,t_ano = stats(df_vendas, ini_ano, hoje)
+
+    t_ontem_ref = filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)["total"].mean() if len(filtrar(df_vendas, ontem_sem_ant, ontem_sem_ant)) else 0
+    _,_,_,t_sem_ant = stats(df_vendas, ini_semana_ref_wtd, fim_semana_ref_wtd)
+    _,_,_,t_mes_ant = stats(df_vendas, ini_mes_ant, fim_mes_ant_equiv)
 
     def _delta_pct(atual, anterior, label_ref):
         if anterior == 0:
@@ -287,7 +295,7 @@ if not df_vendas.empty:
     v1, v2, v3, v4 = st.columns(4)
     v1.metric("Ontem",       f"R$ {v_ontem:,.0f}",  _delta_pct(v_ontem,  v_ontem_ref, f"vs {ontem_sem_ant.strftime('%d/%m')}"))
     v2.metric("Hoje",        f"R$ {v_hoje:,.0f}",   _delta_pct(v_hoje,   v_hoje_ref,  f"vs {hoje_sem_ant.strftime('%d/%m')}"))
-    v3.metric("Esta semana", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant,   "vs semana passada"))
+    v3.metric("Esta semana (WTD)", f"R$ {v_semana:,.0f}", _delta_pct(v_semana, v_sem_ant, label_sem_ant))
     v4.metric(f"Este mês (1–{hoje.day}/{hoje.month})", f"R$ {v_mes:,.0f}", _delta_pct(v_mes, v_mes_ant, label_mes_ant))
 
     st.markdown(
@@ -303,9 +311,9 @@ if not df_vendas.empty:
     br()
 
     tk1, tk2, tk3, tk4 = st.columns(4)
-    tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—")
-    tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—")
-    tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—")
+    tk1.metric("Ticket médio ontem",  f"R$ {t_ontem:,.0f}"  if t_ontem  else "—", _delta_pct(t_ontem,  t_ontem_ref,  f"vs {ontem_sem_ant.strftime('%d/%m')}"))
+    tk2.metric("Ticket médio semana", f"R$ {t_semana:,.0f}" if t_semana else "—", _delta_pct(t_semana, t_sem_ant,    label_sem_ant))
+    tk3.metric("Ticket médio mês",    f"R$ {t_mes:,.0f}"    if t_mes    else "—", _delta_pct(t_mes,    t_mes_ant,    label_mes_ant))
     tk4.metric("Ticket médio ano",    f"R$ {t_ano:,.0f}"    if t_ano    else "—")
 
     br()
@@ -432,17 +440,30 @@ else:
 
     melhorou = (df_hist["Movimento"] == "🟢 Melhorou").sum()
     piorou   = (df_hist["Movimento"] == "🔴 Piorou").sum()
+    lateral  = (df_hist["Movimento"] == "🟡 Lateral").sum()
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Total de mudanças", len(df_hist))
-    m2.metric("🟢 Melhoraram", melhorou)
-    m3.metric("🔴 Pioraram", piorou)
+    m1.metric("🟢 Melhoraram", melhorou)
+    m2.metric("🔴 Pioraram",   piorou)
+    m3.metric("🟡 Lateral",    lateral)
 
     br()
-    st.dataframe(
-        df_hist[["Movimento","Cliente","Cadastro","Últ. compra","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. valor","Penúlt. valor","Data"]],
-        hide_index=True, use_container_width=True
-    )
+
+    _cols_hist = ["Cliente","Cadastro","Últ. compra","Pedidos","Ticket médio","Frequência","Categoria","Tamanho","De","Para","Score Δ","Últ. valor","Penúlt. valor","Data"]
+
+    tab_m, tab_p = st.tabs([f"🟢 Melhoraram ({melhorou})", f"🔴 Pioraram ({piorou})"])
+    with tab_m:
+        df_m = df_hist[df_hist["Movimento"] == "🟢 Melhorou"]
+        if df_m.empty:
+            st.info("Nenhuma melhora neste sync.")
+        else:
+            st.dataframe(df_m[_cols_hist], hide_index=True, use_container_width=True)
+    with tab_p:
+        df_p = df_hist[df_hist["Movimento"] == "🔴 Piorou"]
+        if df_p.empty:
+            st.info("Nenhuma piora neste sync.")
+        else:
+            st.dataframe(df_p[_cols_hist], hide_index=True, use_container_width=True)
 
 st.divider()
 
@@ -612,6 +633,14 @@ with tab_a:
             hide_index=True, use_container_width=True
         )
 
+st.markdown("""
+<div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
+<b>Status</b> — frequência · estágio da relação &nbsp;·&nbsp;
+<b>Valor</b> — segmento financeiro: 💎 VIP/Chegou arrasando &nbsp;·&nbsp; 🔥 Alto/Chegou muito bem &nbsp;·&nbsp; 🍷 Médio/Chegou bem &nbsp;·&nbsp; 🙂 Baixo/Chegou de boa<br>
+<b>Frequência</b> — intervalo médio entre compras: 🟢 ≤30 dias &nbsp;·&nbsp; 🟡 31–60 dias &nbsp;·&nbsp; 🔴 +60 dias
+</div>
+""", unsafe_allow_html=True)
+
 st.divider()
 
 # ── Status × Valor da Relação ─────────────────────────────────────────────────
@@ -638,18 +667,6 @@ _valor_labels = {
     "V5":"👀 Observador",
 }
 
-def _fmt_cell(n, receita):
-    if n == 0:
-        return "—"
-    r = float(receita)
-    if r >= 1_000_000:
-        rs = f"R$ {r/1_000_000:.1f}M"
-    elif r >= 1_000:
-        rs = f"R$ {r/1_000:.0f}k"
-    else:
-        rs = f"R$ {r:.0f}"
-    return f"{int(n)} · {rs}"
-
 pivot_n = df_sv.pivot_table(index="status_code", columns="valor_code", values="n",      aggfunc="sum", fill_value=0)
 pivot_r = df_sv.pivot_table(index="status_code", columns="valor_code", values="receita", aggfunc="sum", fill_value=0)
 
@@ -660,24 +677,34 @@ for vc in _valor_cols:
 pivot_n = pivot_n[_valor_cols]
 pivot_r = pivot_r[_valor_cols]
 
-# monta pivot formatado
-pivot = pivot_n.copy().astype(object)
-for vc in _valor_cols:
-    pivot[vc] = [_fmt_cell(pivot_n.loc[sc, vc], pivot_r.loc[sc, vc]) for sc in pivot_n.index]
+_col_names = [_valor_labels[v].split("/")[0].strip() for v in _valor_cols]
 
-total_n = pivot_n.sum(axis=1)
-total_r = pivot_r.sum(axis=1)
-pivot["Total"] = [_fmt_cell(total_n[sc], total_r[sc]) for sc in pivot_n.index]
+def _build_pivot(raw, fmt_fn):
+    p = raw.copy()
+    p["Total"] = p.sum(axis=1)
+    p = p.reset_index()
+    p["_ord"] = p["status_code"].map(_status_ord)
+    p = p.sort_values("_ord").drop(columns="_ord")
+    p["Status"] = p["status_code"].map(_status_labels)
+    p = p[["Status"] + _valor_cols + ["Total"]]
+    p.columns = ["Status"] + _col_names + ["Total"]
+    for col in _col_names + ["Total"]:
+        p[col] = p[col].apply(fmt_fn)
+    return p
 
-pivot = pivot.reset_index()
-pivot["_ord"] = pivot["status_code"].map(_status_ord)
-pivot = pivot.sort_values("_ord").drop(columns="_ord")
-pivot["Status"] = pivot["status_code"].map(_status_labels)
-cols_ordem = ["Status"] + _valor_cols + ["Total"]
-pivot = pivot[cols_ordem]
-pivot.columns = ["Status"] + [_valor_labels[v].split("/")[0].strip() for v in _valor_cols] + ["Total"]
+def _fmt_n(x):   return int(x) if x > 0 else 0
+def _fmt_r(x):
+    if x == 0: return "—"
+    x = float(x)
+    if x >= 1_000_000: return f"R$ {x/1_000_000:.1f}M"
+    if x >= 1_000:     return f"R$ {x/1_000:.0f}k"
+    return f"R$ {x:.0f}"
 
-st.dataframe(pivot, hide_index=True, use_container_width=True)
+tab_sv_n, tab_sv_r = st.tabs(["👥 Clientes", "💰 Receita"])
+with tab_sv_n:
+    st.dataframe(_build_pivot(pivot_n, _fmt_n), hide_index=True, use_container_width=True)
+with tab_sv_r:
+    st.dataframe(_build_pivot(pivot_r, _fmt_r), hide_index=True, use_container_width=True)
 
 st.markdown("""
 <div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
