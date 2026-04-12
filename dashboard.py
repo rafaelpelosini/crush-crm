@@ -198,10 +198,13 @@ if not st.session_state.autenticado:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-st.markdown("## 💘 Crush CRM")
-st.markdown(f"<span style='color:#aaa;font-size:13px'>Último sync: {last_sync_str} (horário de Brasília)</span>",
-            unsafe_allow_html=True)
-st.divider()
+st.markdown(f"""
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:8px 0 4px">
+    <span style="font-size:28px;font-weight:700">💘 Crush CRM</span>
+    <span style="font-size:12px;color:#aaa">sync {last_sync_str}</span>
+</div>
+<hr style="margin:8px 0 20px;border:none;border-top:1px solid #e2e8f0">
+""", unsafe_allow_html=True)
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 
