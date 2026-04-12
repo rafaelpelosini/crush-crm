@@ -242,6 +242,49 @@ b3.metric("💎 VIPs",          f"{vips:,.0f} clientes",   f"R$ {receita_vip/100
 b4.metric("🧊 Esfriando",     f"{esfriando_n:,.0f} clientes", f"R$ {receita_esfriando/1000:.0f}k em risco",  delta_color="off")
 b5.metric("👻 Ghosting",      f"{ghosting:,.0f} clientes", f"{ghosting/total*100:.0f}% da base",              delta_color="off")
 
+# ── Crescimento da base ───────────────────────────────────────────────────────
+
+_crescimento = query("""
+    WITH dias AS (
+        SELECT
+            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 1          THEN 1 END) ontem,
+            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 2          THEN 1 END) anteontem,
+            COUNT(CASE WHEN registration_date::date >= CURRENT_DATE - 7         THEN 1 END) ultimos_7d,
+            COUNT(CASE WHEN registration_date::date >= CURRENT_DATE - 30        THEN 1 END) ultimos_30d,
+            COUNT(CASE WHEN registration_date::date >= date_trunc('month', CURRENT_DATE) THEN 1 END) mes_atual,
+            COUNT(CASE WHEN registration_date::date >= date_trunc('month', CURRENT_DATE) - interval '1 month'
+                        AND registration_date::date < date_trunc('month', CURRENT_DATE) THEN 1 END) mes_anterior
+        FROM customers
+        WHERE registration_date IS NOT NULL AND registration_date != ''
+    )
+    SELECT *, (ontem - anteontem) delta_dia,
+              (mes_atual - mes_anterior) delta_mes
+    FROM dias
+""")
+_cg = _crescimento.iloc[0]
+
+st.markdown("<div style='margin:12px 0 4px;font-size:0.78rem;font-weight:600;color:#94a3b8;letter-spacing:.05em'>CRESCIMENTO DA BASE</div>", unsafe_allow_html=True)
+_g1, _g2, _g3, _g4 = st.columns(4)
+
+def _delta_str(n):
+    if n > 0: return f"+{int(n)}"
+    if n < 0: return str(int(n))
+    return "="
+
+_g1.metric("📅 Ontem",        f"{int(_cg['ontem'])} cadastros",
+           f"{_delta_str(_cg['delta_dia'])} vs anteontem",
+           delta_color="normal" if _cg["delta_dia"] >= 0 else "inverse")
+_g2.metric("📆 Últimos 7 dias", f"{int(_cg['ultimos_7d'])} cadastros",
+           f"{int(_cg['ultimos_7d']/7*1):.1f} por dia em média", delta_color="off")
+_g3.metric("🗓️ Últimos 30 dias", f"{int(_cg['ultimos_30d'])} cadastros",
+           f"{int(_cg['ultimos_30d']/30*1):.1f} por dia em média", delta_color="off")
+_g4.metric("📊 Mês atual vs anterior",
+           f"{int(_cg['mes_atual'])} cadastros",
+           f"{_delta_str(_cg['delta_mes'])} vs mês anterior",
+           delta_color="normal" if _cg["delta_mes"] >= 0 else "inverse")
+
+st.divider()
+
 # ── Vendas: dia / semana / mês ────────────────────────────────────────────────
 
 section("Vendas por período",
