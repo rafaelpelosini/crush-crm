@@ -712,11 +712,8 @@ pivot_r = pivot_r[_valor_cols]
 
 _col_names = [_valor_labels[v].split("/")[0].strip() for v in _valor_cols]
 
-def _fmt_brl_n(x):
-    return f"{int(x):,}".replace(",", ".") if x > 0 else "0"
-
-def _build_pivot_str(raw, fmt_fn):
-    p = raw.copy()
+def _build_pivot(raw, as_float=False):
+    p = raw.copy().astype(float) if as_float else raw.copy()
     p["Total"] = p.sum(axis=1)
     p = p.reset_index()
     p["#"] = p["status_code"].map(_status_ord)
@@ -725,29 +722,20 @@ def _build_pivot_str(raw, fmt_fn):
     p = p[["#", "Status"] + _valor_cols + ["Total"]]
     p.columns = ["#", "Status"] + _col_names + ["Total"]
     for col in _col_names + ["Total"]:
-        p[col] = p[col].apply(fmt_fn)
+        p[col] = p[col].apply(float)
     return p
 
-def _build_pivot_num(raw):
-    p = raw.copy().astype(float)
-    p["Total"] = p.sum(axis=1)
-    p = p.reset_index()
-    p["#"] = p["status_code"].map(_status_ord)
-    p = p.sort_values("#")
-    p["Status"] = p["status_code"].map(_status_labels)
-    p = p[["#", "Status"] + _valor_cols + ["Total"]]
-    p.columns = ["#", "Status"] + _col_names + ["Total"]
-    return p
-
-_receita_cfg = {c: st.column_config.NumberColumn(c, format="R$ %,.0f") for c in _col_names + ["Total"]}
+_n_cfg  = {c: st.column_config.NumberColumn(c, format="%,.0f")    for c in _col_names + ["Total"]}
+_r_cfg  = {c: st.column_config.NumberColumn(c, format="R$ %,.0f") for c in _col_names + ["Total"]}
+_id_cfg = {"#": st.column_config.NumberColumn("#", width="small")}
 
 tab_sv_n, tab_sv_r = st.tabs(["👥 Clientes", "💰 Receita"])
 with tab_sv_n:
-    st.dataframe(_build_pivot_str(pivot_n, _fmt_brl_n), hide_index=True, use_container_width=True,
-                 column_config={"#": st.column_config.NumberColumn("#", width="small")})
+    st.dataframe(_build_pivot(pivot_n), hide_index=True, use_container_width=True,
+                 column_config={**_id_cfg, **_n_cfg})
 with tab_sv_r:
-    st.dataframe(_build_pivot_num(pivot_r), hide_index=True, use_container_width=True,
-                 column_config={"#": st.column_config.NumberColumn("#", width="small"), **_receita_cfg})
+    st.dataframe(_build_pivot(pivot_r, as_float=True), hide_index=True, use_container_width=True,
+                 column_config={**_id_cfg, **_r_cfg})
 
 st.markdown("""
 <div style="font-size:0.78rem; color:#888; line-height:1.8; margin-top:6px">
