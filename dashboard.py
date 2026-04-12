@@ -1266,13 +1266,15 @@ Estes são os pilares da marca — prioridade em estoque, comunicação e campan
                 color="pct_vip",
                 color_continuous_scale="Greens",
                 labels={
-                    "rank_geral": "Rank receita geral (↓ melhor)",
-                    "rank_vip":   "Rank receita VIPs (↓ melhor)",
+                    "rank_geral": "Rank receita geral (→ melhor)",
+                    "rank_vip":   "Rank receita VIPs (↑ melhor)",
                     "pct_vip":    "% receita de VIPs",
                 },
                 hover_data={"receita_geral": ":,.0f", "receita_vip": ":,.0f", "clientes_vip": True},
             )
             fig_ancora.update_traces(textposition="top center", textfont_size=10)
+            fig_ancora.update_xaxes(autorange="reversed")
+            fig_ancora.update_yaxes(autorange="reversed")
             fig_ancora.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0),
                                      coloraxis_colorbar=dict(title="% VIP"))
             st.plotly_chart(fig_ancora, use_container_width=True)
