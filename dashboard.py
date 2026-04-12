@@ -18,6 +18,20 @@ DATABASE_URL = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
 EXP_PATH     = Path(__file__).parent / "exports"
 _engine      = create_engine(DATABASE_URL)
 
+# Garante que tabelas opcionais existam (migration segura)
+with _engine.connect() as _mc:
+    _mc.execute(text("""
+        CREATE TABLE IF NOT EXISTS insights_history (
+            id         SERIAL PRIMARY KEY,
+            synced_at  TEXT NOT NULL,
+            key        TEXT NOT NULL,
+            value_num  NUMERIC,
+            value_text TEXT,
+            UNIQUE(synced_at, key)
+        )
+    """))
+    _mc.commit()
+
 BRASILIA = timezone(timedelta(hours=-3))
 
 st.set_page_config(
