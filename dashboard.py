@@ -1508,139 +1508,174 @@ st.divider()
 # ── Ações sugeridas ───────────────────────────────────────────────────────────
 
 section("Ações recomendadas",
-        "Segmentos prioritários identificados automaticamente pelo CRM. Cada card mostra quantos clientes estão nesse grupo e sugere o canal de ação. Baixe a lista direto para subir no Meta Ads ou disparar email.")
-
-em_risco_alto = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
-""").iloc[0]["n"]
-
-gelando_alto = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S5' AND valor_code IN ('V1','V2')
-""").iloc[0]["n"]
-
-segundo_pedido_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE frequencia_code = 'F1' AND recencia_code = 'R1'
-""").iloc[0]["n"]
-
-em_pausa_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S7'
-""").iloc[0]["n"]
-
-ghosting_recente_n = query("""
-    SELECT COUNT(*) n FROM crm_profiles
-    WHERE status_code = 'S6' AND recencia_code = 'R3'
-""").iloc[0]["n"]
-
-receita_em_risco = query("""
-    SELECT ROUND(SUM(total_spent),0) v FROM crm_profiles
-    WHERE status_code = 'S4' AND valor_code IN ('V1','V2','V3')
-""").iloc[0]["v"] or 0
+        "Segmentos prioritários identificados automaticamente pelo CRM — com clientes, receita em jogo e canal sugerido. Selecione uma ação abaixo para baixar a lista.")
 
 hoje_str = now_brt().strftime("%Y-%m-%d")
 
+# ── Calcula contagens e receita histórica de cada segmento ────────────────────
+_aq = query("""
+    SELECT
+        COUNT(CASE WHEN status_code='S4' AND valor_code IN('V1','V2','V3')          THEN 1 END) s4_alto_n,
+        ROUND(SUM(CASE WHEN status_code='S4' AND valor_code IN('V1','V2','V3')      THEN total_spent ELSE 0 END)::numeric,0) s4_alto_rs,
+
+        COUNT(CASE WHEN status_code='S5' AND valor_code IN('V1','V2')               THEN 1 END) s5_alto_n,
+        ROUND(SUM(CASE WHEN status_code='S5' AND valor_code IN('V1','V2')           THEN total_spent ELSE 0 END)::numeric,0) s5_alto_rs,
+
+        COUNT(CASE WHEN frequencia_code='F1' AND recencia_code='R1'                 THEN 1 END) f1r1_n,
+        ROUND(SUM(CASE WHEN frequencia_code='F1' AND recencia_code='R1'             THEN total_spent ELSE 0 END)::numeric,0) f1r1_rs,
+
+        COUNT(CASE WHEN status_code='S7'                                            THEN 1 END) s7_n,
+        ROUND(SUM(CASE WHEN status_code='S7'                                        THEN total_spent ELSE 0 END)::numeric,0) s7_rs,
+
+        COUNT(CASE WHEN status_code='S3'                                            THEN 1 END) s3_n,
+        ROUND(SUM(CASE WHEN status_code='S3'                                        THEN total_spent ELSE 0 END)::numeric,0) s3_rs,
+
+        COUNT(CASE WHEN status_code='S6' AND recencia_code='R3'                     THEN 1 END) s6r3_n,
+        ROUND(SUM(CASE WHEN status_code='S6' AND recencia_code='R3'                 THEN total_spent ELSE 0 END)::numeric,0) s6r3_rs,
+
+        COUNT(CASE WHEN personalidade_code='P3' AND recencia_code IN('R1','R2')     THEN 1 END) p3_n,
+        ROUND(SUM(CASE WHEN personalidade_code='P3' AND recencia_code IN('R1','R2') THEN total_spent ELSE 0 END)::numeric,0) p3_rs,
+
+        COUNT(CASE WHEN personalidade_code='P1'                                     THEN 1 END) p1_n,
+        ROUND(SUM(CASE WHEN personalidade_code='P1'                                 THEN total_spent ELSE 0 END)::numeric,0) p1_rs,
+
+        COUNT(CASE WHEN status_code IN('S1','S2') AND recencia_code IN('R1','R2')   THEN 1 END) ret_n,
+        ROUND(SUM(CASE WHEN status_code IN('S1','S2') AND recencia_code IN('R1','R2') THEN total_spent ELSE 0 END)::numeric,0) ret_rs,
+
+        COUNT(CASE WHEN personalidade_code IN('P1','P2') AND status_code IN('S1','S2') THEN 1 END) look_n,
+
+        COUNT(CASE WHEN status_code IN('S5','S6') AND valor_code IN('V4','V5')      THEN 1 END) sup_n
+    FROM crm_profiles
+""")
+_r = _aq.iloc[0]
+
 ACOES = [
-    {
-        "prioridade": "🔴 Alta",
-        "acao": "Reativação urgente",
-        "segmento": "Esfriando (alto valor)",
-        "clientes": em_risco_alto,
-        "detalhe": f"R$ {receita_em_risco:,.0f} em receita histórica em jogo",
-        "canal": "Email + WhatsApp",
-        "bg": "#fff5f5",
-        "tooltip": "Clientes que gastaram R$500+ mas não compram há 181–270 dias. Janela crítica antes de gelar de vez.",
-        "filtro": "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
-        "arquivo": f"{hoje_str}_em_risco_alto_valor.csv",
-    },
-    {
-        "prioridade": "🔴 Alta",
-        "acao": "Win-back",
-        "segmento": "Gelando (alto valor)",
-        "clientes": gelando_alto,
-        "detalhe": "Gastaram muito — vale uma oferta exclusiva",
-        "canal": "Email personalizado",
-        "bg": "#fff5f5",
-        "tooltip": "Clientes de alto valor (R$2.500+) que sumiram há 9 meses ou mais. Última janela real de recuperação.",
-        "filtro": "status_code = 'S5' AND valor_code IN ('V1','V2')",
-        "arquivo": f"{hoje_str}_perdidos_alto_valor.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Induzir 2ª compra",
-        "segmento": "Novo Crush recente",
-        "clientes": segundo_pedido_n,
-        "detalhe": "2ª compra é o maior preditor de fidelização",
-        "canal": "Email + Meta Ads retargeting",
-        "bg": "#fffbea",
-        "tooltip": "Fizeram 1 pedido nos últimos 90 dias. O segundo pedido transforma um comprador casual em cliente fiel.",
-        "filtro": "frequencia_code = 'F1' AND recencia_code = 'R1'",
-        "arquivo": f"{hoje_str}_segundo_pedido.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Trazer de volta",
-        "segmento": "Em Pausa (com histórico)",
-        "clientes": em_pausa_n,
-        "detalhe": "2+ compras — têm vínculo real com a marca",
-        "canal": "Email + remarketing",
-        "bg": "#fffbea",
-        "tooltip": "Clientes com 2+ pedidos que pausaram há 3–9 meses. Diferente do Ghosting — elas já provaram que voltam.",
-        "filtro": "status_code = 'S7'",
-        "arquivo": f"{hoje_str}_em_pausa.csv",
-    },
-    {
-        "prioridade": "🟡 Média",
-        "acao": "Reativar Ghosting recente",
-        "segmento": "Ghosting 6–9 meses",
-        "clientes": ghosting_recente_n,
-        "detalhe": "Ainda dentro da janela de memória da marca",
-        "canal": "Meta Ads retargeting",
-        "bg": "#fffbea",
-        "tooltip": "Compraram 1 vez e sumiram há 6–9 meses. Mais recentes têm maior chance de responder do que os que sumiram há 1 ano+.",
-        "filtro": "status_code = 'S6' AND recencia_code = 'R3'",
-        "arquivo": f"{hoje_str}_ghosting_recente.csv",
-    },
-    {
-        "prioridade": "🟢 Contínua",
-        "acao": "Lookalike Meta Ads",
-        "segmento": "VIPs + Lovers ativos",
-        "clientes": int(vips),
-        "detalhe": "Seed para encontrar novos clientes parecidos",
-        "canal": "Meta Ads",
-        "bg": "#f0fff4",
-        "tooltip": "Os melhores clientes ativos da base. Usados como modelo para o Meta Ads encontrar pessoas com perfil similar.",
-        "filtro": "personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",
-        "arquivo": f"{hoje_str}_lookalike_seed.csv",
-    },
+    # ── Reativação ──────────────────────────────────────────────────────────
+    dict(prioridade="🔴 Alta",     objetivo="Reativar",  acao="Reativação urgente",
+         segmento="Esfriando alto valor",
+         clientes=int(_r["s4_alto_n"]), receita=float(_r["s4_alto_rs"] or 0),
+         canal="Email + WhatsApp",
+         tooltip="Gastaram bem mas não compram há 6–9 meses. Janela crítica antes de gelar.",
+         filtro="status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
+         arquivo=f"{hoje_str}_reativacao_alto_valor.csv"),
+
+    dict(prioridade="🔴 Alta",     objetivo="Reativar",  acao="Win-back",
+         segmento="Gelando alto valor",
+         clientes=int(_r["s5_alto_n"]), receita=float(_r["s5_alto_rs"] or 0),
+         canal="Email personalizado",
+         tooltip="Alto valor histórico, sumidas há 9+ meses. Última janela real de recuperação.",
+         filtro="status_code = 'S5' AND valor_code IN ('V1','V2')",
+         arquivo=f"{hoje_str}_winback_alto_valor.csv"),
+
+    dict(prioridade="🟡 Média",    objetivo="Reativar",  acao="Trazer de volta",
+         segmento="Em Pausa",
+         clientes=int(_r["s7_n"]), receita=float(_r["s7_rs"] or 0),
+         canal="Email + Remarketing",
+         tooltip="2+ compras, pausadas há 3–9 meses. Têm vínculo real — diferente do Ghosting.",
+         filtro="status_code = 'S7'",
+         arquivo=f"{hoje_str}_em_pausa.csv"),
+
+    dict(prioridade="🟡 Média",    objetivo="Reativar",  acao="Reativar enquanto lembra",
+         segmento="Morno (1 compra 3–6 meses)",
+         clientes=int(_r["s3_n"]), receita=float(_r["s3_rs"] or 0),
+         canal="Email + Meta Ads",
+         tooltip="Compraram 1 vez há 3–6 meses. Janela de conversão ainda aberta.",
+         filtro="status_code = 'S3'",
+         arquivo=f"{hoje_str}_morno.csv"),
+
+    dict(prioridade="🟡 Média",    objetivo="Reativar",  acao="Ghosting recente",
+         segmento="Ghosting 6–9 meses",
+         clientes=int(_r["s6r3_n"]), receita=float(_r["s6r3_rs"] or 0),
+         canal="Meta Ads Retargeting",
+         tooltip="1 compra e sumiram há 6–9 meses. Ainda dentro da janela de memória da marca.",
+         filtro="status_code = 'S6' AND recencia_code = 'R3'",
+         arquivo=f"{hoje_str}_ghosting_recente.csv"),
+
+    # ── Conversão ───────────────────────────────────────────────────────────
+    dict(prioridade="🟡 Média",    objetivo="Converter", acao="Induzir 2ª compra",
+         segmento="Novo Crush recente (F1 R1)",
+         clientes=int(_r["f1r1_n"]), receita=float(_r["f1r1_rs"] or 0),
+         canal="Email + Meta Ads",
+         tooltip="1ª compra nos últimos 90 dias. A 2ª compra é o maior preditor de fidelização.",
+         filtro="frequencia_code = 'F1' AND recencia_code = 'R1'",
+         arquivo=f"{hoje_str}_segundo_pedido.csv"),
+
+    dict(prioridade="🟡 Média",    objetivo="Converter", acao="Converter para recorrência",
+         segmento="Crush promissor recente",
+         clientes=int(_r["p3_n"]), receita=float(_r["p3_rs"] or 0),
+         canal="Email + Retargeting",
+         tooltip="Gastaram bem (M3+) mas ainda com poucas compras. Alta propensão a virar recorrente.",
+         filtro="personalidade_code = 'P3' AND recencia_code IN ('R1','R2')",
+         arquivo=f"{hoje_str}_crush_promissor.csv"),
+
+    # ── Retenção ────────────────────────────────────────────────────────────
+    dict(prioridade="🟢 Contínua", objetivo="Reter",     acao="Manter engajadas",
+         segmento="Sugar Lovers",
+         clientes=int(_r["p1_n"]), receita=float(_r["p1_rs"] or 0),
+         canal="Email VIP + WhatsApp",
+         tooltip="Frequentes e alto valor. Não precisam ser reativadas — precisam ser celebradas.",
+         filtro="personalidade_code = 'P1'",
+         arquivo=f"{hoje_str}_sugar_lovers.csv"),
+
+    dict(prioridade="🟢 Contínua", objetivo="Reter",     acao="Retargeting de lançamentos",
+         segmento="Fiéis e Novos Crushes ativos",
+         clientes=int(_r["ret_n"]), receita=float(_r["ret_rs"] or 0),
+         canal="Meta Ads",
+         tooltip="Ativas e recentes — o público mais receptivo para lançamentos e novidades.",
+         filtro="status_code IN ('S1','S2') AND recencia_code IN ('R1','R2')",
+         arquivo=f"{hoje_str}_retargeting_quente.csv"),
+
+    # ── Aquisição ───────────────────────────────────────────────────────────
+    dict(prioridade="🟢 Contínua", objetivo="Adquirir",  acao="Seed Lookalike",
+         segmento="Melhores clientes ativas",
+         clientes=int(_r["look_n"]), receita=0.0,
+         canal="Meta Ads Lookalike",
+         tooltip="Lovers e VIPs ativos — semente para o Meta encontrar perfis similares.",
+         filtro="personalidade_code IN ('P1','P2') AND status_code IN ('S1','S2')",
+         arquivo=f"{hoje_str}_lookalike_seed.csv"),
+
+    dict(prioridade="⚫ Supressão", objetivo="Excluir",  acao="Excluir das campanhas",
+         segmento="Ghosting/Gelando baixo valor",
+         clientes=int(_r["sup_n"]), receita=0.0,
+         canal="Meta Ads + Email",
+         tooltip="Baixo valor histórico e sumidas. Gastar verba aqui tem ROI negativo.",
+         filtro="status_code IN ('S5','S6') AND valor_code IN ('V4','V5')",
+         arquivo=f"{hoje_str}_supressao.csv"),
 ]
 
-cols = st.columns(3)
-for i, a in enumerate(ACOES):
-    col = cols[i % 3]
-    col.markdown(f"""
-    <div style="background:{a['bg']};border-radius:12px;padding:16px;height:175px;border:1px solid #e2e8f0">
-        <div style="font-size:11px;color:#888;margin-bottom:6px">{a['prioridade']}</div>
-        <div style="font-size:14px;font-weight:700;margin-bottom:2px">{a['acao']} {tip(a['tooltip'])}</div>
-        <div style="font-size:12px;color:#555;margin-bottom:6px">{a['segmento']}</div>
-        <div style="font-size:20px;font-weight:700;color:#7c3aed">{a['clientes']:,.0f} <span style="font-size:11px;font-weight:400;color:#888">clientes</span></div>
-        <div style="font-size:11px;color:#aaa;margin-top:4px">{a['detalhe']}</div>
-        <div style="font-size:11px;color:#7c3aed;margin-top:4px">📣 {a['canal']}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    br()
-    col.download_button(
-        label="⬇️ Baixar lista",
-        data=csv_bytes(a["filtro"]),
-        file_name=a["arquivo"],
-        mime="text/csv",
-        use_container_width=True,
-        key=f"dl_{a['arquivo']}",
-    )
+# ── Tabela ─────────────────────────────────────────────────────────────────────
+_df_acoes = pd.DataFrame([{
+    "Prioridade":        a["prioridade"],
+    "Objetivo":          a["objetivo"],
+    "Ação":              a["acao"],
+    "Segmento":          a["segmento"],
+    "Clientes":          a["clientes"],
+    "Receita histórica": a["receita"],
+    "Canal":             a["canal"],
+} for a in ACOES])
 
+st.dataframe(
+    _df_acoes, hide_index=True, use_container_width=True,
+    column_config={
+        "Clientes":          st.column_config.NumberColumn("Clientes",          format="%,.0f"),
+        "Receita histórica": st.column_config.NumberColumn("Receita histórica", format="R$ %,.0f"),
+    },
+)
+
+# ── Download ───────────────────────────────────────────────────────────────────
 br()
+_nomes_acoes = [f"{a['prioridade']}  {a['acao']} — {a['segmento']}" for a in ACOES]
+_escolha_idx = st.selectbox("Baixar lista de clientes:", range(len(ACOES)),
+                             format_func=lambda i: _nomes_acoes[i],
+                             label_visibility="collapsed")
+_sel = ACOES[_escolha_idx]
+st.download_button(
+    f"⬇️ Baixar  {_sel['acao']} ({_sel['clientes']:,} clientes)",
+    data=csv_bytes(_sel["filtro"]),
+    file_name=_sel["arquivo"],
+    mime="text/csv",
+    use_container_width=False,
+)
 st.divider()
 
 # ── Segmentos prioritários ────────────────────────────────────────────────────
