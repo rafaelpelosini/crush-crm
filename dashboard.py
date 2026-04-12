@@ -1269,6 +1269,199 @@ Estes são os pilares da marca — prioridade em estoque, comunicação e campan
 
 st.divider()
 
+# ── 💡 Sabia que? ─────────────────────────────────────────────────────────────
+
+section("💡 Sabia que?", "Curiosidades descobertas direto nos dados — calculadas em tempo real.")
+
+def _sabia_card(emoji: str, headline: str, body: str):
+    st.markdown(f"""
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
+            padding:18px 20px;height:100%;margin-bottom:4px">
+  <div style="font-size:1.6rem;margin-bottom:6px">{emoji}</div>
+  <div style="font-size:0.95rem;font-weight:600;color:#1e293b;line-height:1.4;margin-bottom:6px">{headline}</div>
+  <div style="font-size:0.78rem;color:#64748b;line-height:1.4">{body}</div>
+</div>""", unsafe_allow_html=True)
+
+# ── Dado 1: categoria que mais fideliza ──────────────────────────────────────
+_d1 = query(f"""
+    WITH primeira_cat AS (
+        SELECT o.customer_id, i.category,
+               ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+        FROM orders o
+        JOIN order_items i ON i.order_id = o.woo_id
+        WHERE o.status NOT IN ('cancelled','refunded','failed')
+          AND i.category IS NOT NULL AND i.category != ''
+    )
+    SELECT pc.category AS categoria,
+           COUNT(DISTINCT pc.customer_id) total,
+           COUNT(DISTINCT CASE WHEN p.orders_count >= 2 THEN pc.customer_id END) recorrentes,
+           ROUND(100.0 * COUNT(DISTINCT CASE WHEN p.orders_count >= 2 THEN pc.customer_id END)
+                 / NULLIF(COUNT(DISTINCT pc.customer_id), 0), 1) pct
+    FROM primeira_cat pc
+    JOIN crm_profiles p ON p.customer_id = pc.customer_id
+    WHERE pc.rn = 1
+    GROUP BY pc.category
+    HAVING COUNT(DISTINCT pc.customer_id) >= 30
+    ORDER BY pct DESC
+    LIMIT 2
+""")
+
+# ── Dado 2: produto surpresa das VIPs (alto rank VIP, baixo rank geral) ───────
+_d2 = query(f"""
+    WITH geral AS (
+        SELECT regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{{1,3}}$', '') produto,
+               RANK() OVER (ORDER BY SUM(i.total) DESC) rank_geral
+        FROM order_items i JOIN orders o ON o.woo_id = i.order_id
+        WHERE o.status NOT IN ('cancelled','refunded','failed') AND i.product_name != ''
+        GROUP BY regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{{1,3}}$', '')
+    ),
+    vip AS (
+        SELECT regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{{1,3}}$', '') produto,
+               RANK() OVER (ORDER BY SUM(i.total) DESC) rank_vip,
+               COUNT(DISTINCT o.customer_id) clientes_vip
+        FROM order_items i JOIN orders o ON o.woo_id = i.order_id
+        JOIN crm_profiles p ON p.customer_id = o.customer_id
+        WHERE p.valor_code IN ('V1','V2')
+          AND o.status NOT IN ('cancelled','refunded','failed') AND i.product_name != ''
+        GROUP BY regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{{1,3}}$', '')
+    )
+    SELECT v.produto, v.rank_vip, g.rank_geral, v.clientes_vip
+    FROM vip v JOIN geral g ON g.produto = v.produto
+    WHERE v.rank_vip <= 15 AND g.rank_geral > 40
+    ORDER BY (g.rank_geral - v.rank_vip) DESC
+    LIMIT 1
+""")
+
+# ── Dado 3: tempo médio até 2ª compra ─────────────────────────────────────────
+_d3 = query("""
+    WITH ord AS (
+        SELECT customer_id, date_created,
+               ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY date_created) rn
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+    )
+    SELECT ROUND(AVG(o2.date_created - o1.date_created)) dias_media,
+           ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY o2.date_created - o1.date_created)) dias_mediana
+    FROM ord o1 JOIN ord o2 ON o2.customer_id = o1.customer_id AND o2.rn = 2
+    WHERE o1.rn = 1
+""")
+
+# ── Dado 4: % receita de clientes com 2+ anos de casa ─────────────────────────
+_d4 = query("""
+    SELECT ROUND(100.0 * SUM(CASE WHEN tenure_code IN ('T5','T6','T7','T8') THEN total_spent ELSE 0 END)
+                 / NULLIF(SUM(total_spent), 0), 0) pct_receita,
+           COUNT(CASE WHEN tenure_code IN ('T5','T6','T7','T8') THEN 1 END) clientes,
+           ROUND(100.0 * COUNT(CASE WHEN tenure_code IN ('T5','T6','T7','T8') THEN 1 END)
+                 / NULLIF(COUNT(*), 0), 0) pct_base
+    FROM crm_profiles
+    WHERE orders_count > 0
+""")
+
+# ── Dado 5: primeiro produto das VIPs ─────────────────────────────────────────
+_d5 = query(f"""
+    WITH primeira AS (
+        SELECT o.customer_id,
+               regexp_replace(i.product_name, '\\s*-\\s*[A-ZÁÉÍÓÚÃÕ]{{1,3}}$', '') produto,
+               ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+        FROM orders o JOIN order_items i ON i.order_id = o.woo_id
+        WHERE o.status NOT IN ('cancelled','refunded','failed') AND i.product_name != ''
+    )
+    SELECT produto, COUNT(*) n
+    FROM primeira p
+    JOIN crm_profiles c ON c.customer_id = p.customer_id
+    WHERE p.rn = 1 AND c.valor_code = 'V1'
+    GROUP BY produto
+    ORDER BY n DESC
+    LIMIT 1
+""")
+
+# ── Dado 6: categoria com mais ghosting ───────────────────────────────────────
+_d6 = query(f"""
+    WITH primeira_cat AS (
+        SELECT o.customer_id, i.category,
+               ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.date_created) rn
+        FROM orders o
+        JOIN order_items i ON i.order_id = o.woo_id
+        WHERE o.status NOT IN ('cancelled','refunded','failed')
+          AND i.category IS NOT NULL AND i.category != ''
+    )
+    SELECT pc.category AS categoria,
+           COUNT(DISTINCT pc.customer_id) total,
+           COUNT(DISTINCT CASE WHEN p.status_code = 'S6' THEN pc.customer_id END) ghostings,
+           ROUND(100.0 * COUNT(DISTINCT CASE WHEN p.status_code = 'S6' THEN pc.customer_id END)
+                 / NULLIF(COUNT(DISTINCT pc.customer_id), 0), 0) pct_ghost
+    FROM primeira_cat pc
+    JOIN crm_profiles p ON p.customer_id = pc.customer_id
+    WHERE pc.rn = 1
+    GROUP BY pc.category
+    HAVING COUNT(DISTINCT pc.customer_id) >= 30
+    ORDER BY pct_ghost DESC
+    LIMIT 1
+""")
+
+# ── Monta os cards ─────────────────────────────────────────────────────────────
+_sc1, _sc2, _sc3 = st.columns(3)
+_sc4, _sc5, _sc6 = st.columns(3)
+
+with _sc1:
+    if not _d1.empty and len(_d1) >= 2:
+        _top = _d1.iloc[0]
+        _bot = _d1.iloc[1]
+        _sabia_card("🎯",
+            f"Quem começa em <b>{_top['categoria']}</b> volta mais",
+            f"{_top['pct']:.0f}% das clientes que fizeram a primeira compra em "
+            f"<b>{_top['categoria']}</b> fizeram ao menos uma 2ª compra — "
+            f"vs {_bot['pct']:.0f}% em {_bot['categoria']}. "
+            f"Vale priorizar esse produto no fluxo pós-compra.")
+
+with _sc2:
+    if not _d2.empty:
+        _r = _d2.iloc[0]
+        _sabia_card("🕵️",
+            f"O produto secreto das VIPs",
+            f"<b>{_r['produto']}</b> está no top {int(_r['rank_vip'])} de receita entre suas VIPs, "
+            f"mas só aparece em #{int(_r['rank_geral'])} no ranking geral. "
+            f"{int(_r['clientes_vip'])} clientes de alto valor compraram — quase invisível na base toda.")
+
+with _sc3:
+    if not _d3.empty:
+        _r = _d3.iloc[0]
+        _media  = int(_r["dias_media"]  or 0)
+        _mediana= int(_r["dias_mediana"] or 0)
+        _sabia_card("⏱️",
+            f"A janela de ouro: {_mediana} dias",
+            f"Metade das clientes que voltam fazem a 2ª compra em até <b>{_mediana} dias</b> "
+            f"(média: {_media} dias). Depois disso a probabilidade cai. "
+            f"Email entre o dia 30 e {_mediana} pode ser o gatilho certo.")
+
+with _sc4:
+    if not _d4.empty:
+        _r = _d4.iloc[0]
+        _sabia_card("🏡",
+            f"{int(_r['pct_receita'] or 0)}% da receita vem de clientes com 2+ anos",
+            f"São apenas <b>{int(_r['pct_base'] or 0)}% da base</b> ({int(_r['clientes'] or 0)} clientes) "
+            f"— mas respondem por quase <b>{int(_r['pct_receita'] or 0)}%</b> de tudo que entra. "
+            f"Perder uma dessas é muito mais caro do que parece.")
+
+with _sc5:
+    if not _d5.empty:
+        _r = _d5.iloc[0]
+        _sabia_card("👑",
+            f"A 1ª compra das VIPs começa em <b>{_r['produto']}</b>",
+            f"<b>{int(_r['n'])} das suas VIPs</b> (V1) fizeram a primeira compra nesse produto. "
+            f"Ele pode ser um indicador precoce de quem vai se tornar cliente de alto valor.")
+
+with _sc6:
+    if not _d6.empty:
+        _r = _d6.iloc[0]
+        _sabia_card("👻",
+            f"Quem começa em <b>{_r['categoria']}</b> some mais",
+            f"<b>{int(_r['pct_ghost'])}%</b> das clientes que compraram {_r['categoria']} como "
+            f"primeira compra nunca mais voltaram (Ghosting). "
+            f"Pode indicar produto de impulso — vale ativar mais rápido após essa compra.")
+
+st.divider()
+
 # ── Audiências para a agência ─────────────────────────────────────────────────
 
 section("Audiências para a agência",
