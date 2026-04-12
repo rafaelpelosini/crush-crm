@@ -1287,13 +1287,21 @@ st.divider()
 
 section("💡 Sabia que?", "Curiosidades descobertas direto nos dados — calculadas em tempo real.")
 
-def _sabia_card(emoji: str, headline: str, body: str):
+def _sabia_card(emoji: str, headline: str, body: str, trend: str = "", trend_color: str = ""):
+    _badge = ""
+    if trend:
+        _badge = (f'<div style="font-size:0.72rem;font-weight:700;color:{trend_color};'
+                  f'background:{trend_color}18;padding:2px 8px;border-radius:20px;'
+                  f'white-space:nowrap">{trend}</div>')
     st.markdown(f"""
-<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
-            padding:18px 20px;height:100%;margin-bottom:4px">
-  <div style="font-size:1.6rem;margin-bottom:6px">{emoji}</div>
-  <div style="font-size:0.95rem;font-weight:600;color:#1e293b;line-height:1.4;margin-bottom:6px">{headline}</div>
-  <div style="font-size:0.78rem;color:#64748b;line-height:1.4">{body}</div>
+<div style="border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;
+            min-height:175px;margin-bottom:4px;box-sizing:border-box">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+    <div style="font-size:1.5rem;line-height:1">{emoji}</div>
+    {_badge}
+  </div>
+  <div style="font-size:0.92rem;font-weight:600;color:#1e293b;line-height:1.4;margin-bottom:6px">{headline}</div>
+  <div style="font-size:0.76rem;color:#64748b;line-height:1.45">{body}</div>
 </div>""", unsafe_allow_html=True)
 
 _tab_fund, _tab_achados = st.tabs(["⭐ Fundamentais", "🔍 Novos Achados"])
@@ -1460,6 +1468,37 @@ with _tab_fund:
         ORDER BY registration_date ASC LIMIT 1
     """)
 
+    # ── Carrega snapshots para tendências ─────────────────────────────────────
+    _fund_snaps = query("""
+        SELECT synced_at, key, value_num
+        FROM insights_history
+        WHERE synced_at IN (
+            SELECT DISTINCT synced_at FROM insights_history ORDER BY synced_at DESC LIMIT 2
+        )
+    """)
+    _fsnap_curr, _fsnap_prev = {}, {}
+    if not _fund_snaps.empty:
+        _fdates = sorted(_fund_snaps["synced_at"].unique(), reverse=True)
+        if len(_fdates) >= 1:
+            _fc = _fund_snaps[_fund_snaps["synced_at"] == _fdates[0]].set_index("key")["value_num"]
+            _fsnap_curr = _fc.to_dict()
+        if len(_fdates) >= 2:
+            _fp = _fund_snaps[_fund_snaps["synced_at"] == _fdates[1]].set_index("key")["value_num"]
+            _fsnap_prev = _fp.to_dict()
+
+    def _trend(key: str, down_good: bool = False):
+        """Retorna (trend_str, trend_color) para o card, ou ('','') se sem dados."""
+        c = _fsnap_curr.get(key); p = _fsnap_prev.get(key)
+        if c is None or p is None or p == 0:
+            return "", ""
+        delta = (float(c) - float(p)) / abs(float(p)) * 100
+        if abs(delta) < 2:
+            return "", ""
+        seta  = "↑" if delta > 0 else "↓"
+        good  = (delta < 0) if down_good else (delta > 0)
+        color = "#16a34a" if good else "#dc2626"
+        return f"{seta} {abs(delta):.1f}%", color
+
     # ── Grid 4×4 ──────────────────────────────────────────────────────────────
     _fr = [st.columns(4) for _ in range(4)]
 
@@ -1467,51 +1506,57 @@ with _tab_fund:
     with _fr[0][0]:
         if not _f1.empty and len(_f1) >= 2:
             _top = _f1.iloc[0]; _bot = _f1.iloc[-1]
+            _t, _tc = _trend("top_conv_pct", down_good=False)
             _sabia_card("🎯", f"Quem começa em <b>{_top['categoria']}</b> volta mais",
                 f"{float(_top['pct_conv']):.0f}% das que estrearam em <b>{_top['categoria']}</b> fizeram uma 2ª compra "
                 f"— vs {float(_bot['pct_conv']):.0f}% em {_bot['categoria']}. "
-                f"Esse produto merece destaque no email pós-compra.")
+                f"Esse produto merece destaque no email pós-compra.", _t, _tc)
 
     with _fr[0][1]:
         if not _f1.empty:
             _ghost_row = _f1.nlargest(1, "pct_ghost").iloc[0]
+            _t, _tc = _trend("top_ghost_pct", down_good=True)
             _sabia_card("👻", f"Quem começa em <b>{_ghost_row['categoria']}</b> some mais",
                 f"<b>{int(_ghost_row['pct_ghost'])}%</b> das que compraram "
                 f"<b>{_ghost_row['categoria']}</b> como 1ª compra nunca mais voltaram. "
-                f"Produto de impulso — ativar em até 30 dias pode mudar esse número.")
+                f"Produto de impulso — ativar em até 30 dias pode mudar esse número.", _t, _tc)
 
     with _fr[0][2]:
         if not _f2.empty:
             _r = _f2.iloc[0]
             _med = int(_r["dias_mediana"] or 0); _avg = int(_r["dias_media"] or 0)
+            _t, _tc = _trend("janela_ouro", down_good=True)
             _sabia_card("⏱️", f"A janela de ouro: <b>{_med} dias</b>",
                 f"Metade das que voltam fazem a 2ª compra em até <b>{_med} dias</b> (média: {_avg} dias). "
                 f"Depois disso a probabilidade cai rápido. "
-                f"Disparo entre o dia 20 e {_med} pode ser o gatilho certo.")
+                f"Disparo entre o dia 20 e {_med} pode ser o gatilho certo.", _t, _tc)
 
     with _fr[0][3]:
         if not _f3.empty:
             _r = _f3.iloc[0]
+            _t, _tc = _trend("ghosting_rate", down_good=True)
             _sabia_card("🚪", f"{int(_r['pct_ghost'])}% das compradoras nunca voltaram",
                 f"Das <b>{int(_r['uma_compra']):,} clientes</b> que compraram ao menos uma vez, "
                 f"<b>{int(_r['pct_ghost'])}%</b> ficou no Ghosting. "
-                f"Converter só 10% delas em recorrentes teria impacto enorme na receita.")
+                f"Converter só 10% delas em recorrentes teria impacto enorme na receita.", _t, _tc)
 
     # Linha 1 — Valor
     with _fr[1][0]:
         if not _f4.empty:
             _pct = int(_f4.iloc[0]["pct"] or 0)
+            _t, _tc = _trend("concentracao_top10")
             _sabia_card("📐", f"Top 10% das clientes = <b>{_pct}% da receita</b>",
                 f"1 em cada 10 clientes que compraram responde por <b>{_pct}%</b> de toda a receita histórica. "
-                f"Reter esse grupo é a alavanca financeira mais direta da marca.")
+                f"Reter esse grupo é a alavanca financeira mais direta da marca.", _t, _tc)
 
     with _fr[1][1]:
         if not _f5.empty:
             _r = _f5.iloc[0]
+            _t, _tc = _trend("pct_receita_2anos", down_good=False)
             _sabia_card("🏡", f"{int(_r['pct_receita'] or 0)}% da receita vem de clientes com 2+ anos",
                 f"São apenas <b>{int(_r['pct_base'] or 0)}% da base</b> ({int(_r['clientes'] or 0):,} clientes) "
                 f"— mas respondem por <b>{int(_r['pct_receita'] or 0)}%</b> de tudo que entra. "
-                f"Perder uma dessas custa muito mais do que parece.")
+                f"Perder uma dessas custa muito mais do que parece.", _t, _tc)
 
     with _fr[1][2]:
         if not _f6.empty:
@@ -1525,45 +1570,50 @@ with _tab_fund:
             _r = _f7.iloc[0]
             _tv = int(_r["ticket_vip"] or 0); _tg = int(_r["ticket_ghost"] or 0)
             if _tv > 0 and _tg > 0:
+                _t, _tc = _trend("ticket_vip_1a", down_good=False)
                 _sabia_card("💸", f"VIPs já chegam gastando {int((_tv/_tg - 1)*100)}% a mais",
                     f"O ticket médio da <b>1ª compra das VIPs</b> foi R$ {_tv:,.0f} "
                     f"vs R$ {_tg:,.0f} de quem ghostou. "
-                    f"Ticket alto na entrada é um sinal precoce de potencial.")
+                    f"Ticket alto na entrada é um sinal precoce de potencial.", _t, _tc)
 
     # Linha 2 — Ação imediata
     with _fr[2][0]:
         if not _f8.empty:
             _r = _f8.iloc[0]
+            _t, _tc = _trend("adormecido_rs", down_good=True)
             _sabia_card("😴", f"R$ {int(_r['receita_historica'] or 0):,.0f} adormecidos",
                 f"<b>{int(_r['clientes'])} clientes</b> de alto valor (V1–V3) estão esfriando ou gelando. "
                 f"Já gastaram <b>R$ {int(_r['receita_historica'] or 0):,.0f}</b> historicamente. "
-                f"Win-back direcionado aqui tem o maior ROI possível.")
+                f"Win-back direcionado aqui tem o maior ROI possível.", _t, _tc)
 
     with _fr[2][1]:
         if not _f9.empty:
             _r = _f9.iloc[0]
+            _t, _tc = _trend("pct_compra_1mes", down_good=False)
             _sabia_card("⚡", f"{int(_r['pct'])}% compra no 1º mês após o cadastro",
                 f"<b>{int(_r['no_primeiro_mes']):,} clientes</b> fizeram a primeira compra "
                 f"em até 30 dias do cadastro. "
-                f"Quem não compra no 1º mês tende a demorar muito mais — ou nunca comprar.")
+                f"Quem não compra no 1º mês tende a demorar muito mais — ou nunca comprar.", _t, _tc)
 
     with _fr[2][2]:
         if not _f10.empty:
             _n = int(_f10.iloc[0]["n"] or 0)
+            _t, _tc = _trend("reativadas", down_good=False)
             _sabia_card("🔄", f"{_n:,} clientes voltaram depois de sumir",
                 f"<b>{_n} clientes</b> que chegaram a ficar em Ghosting ou Gelando "
                 f"hoje estão ativas novamente. "
-                f"Reativação funciona — e cada uma que volta vale muito mais que uma nova.")
+                f"Reativação funciona — e cada uma que volta vale muito mais que uma nova.", _t, _tc)
 
     with _fr[2][3]:
         if not _f11.empty:
             _r = _f11.iloc[0]
             _mv = float(_r["media_vip"] or 0); _mg = float(_r["media_geral"] or 0)
             if _mg > 0:
+                _t, _tc = _trend("media_pedidos_vip", down_good=False)
                 _sabia_card("📊", f"VIPs compram <b>{_mv:.1f}x</b> em média",
                     f"A média geral é <b>{_mg:.1f} pedidos</b> por cliente. "
                     f"As VIPs chegam a <b>{_mv:.1f} pedidos</b> — "
-                    f"{int((_mv/_mg - 1)*100)}% a mais. Frequência e valor caminham juntos.")
+                    f"{int((_mv/_mg - 1)*100)}% a mais. Frequência e valor caminham juntos.", _t, _tc)
 
     # Linha 3 — História da marca
     with _fr[3][0]:
