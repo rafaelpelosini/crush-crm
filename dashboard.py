@@ -1507,6 +1507,98 @@ with _tab_achados:
 
 st.divider()
 
+# ── Cohort de Retenção ────────────────────────────────────────────────────────
+
+section("Cohort de Retenção",
+        "Mostra, para cada mês de primeira compra, qual % das clientes voltou a comprar nos meses seguintes. "
+        "Ajuda a entender se a marca está melhorando ou piorando na retenção ao longo do tempo.")
+
+_cohort_df = query("""
+    WITH completed AS (
+        SELECT customer_id, date_created::date AS order_date
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
+          AND customer_id > 0
+    ),
+    first_purchase AS (
+        SELECT customer_id, MIN(order_date) AS first_date
+        FROM completed GROUP BY customer_id
+    ),
+    cohort_data AS (
+        SELECT
+            fp.customer_id,
+            date_trunc('month', fp.first_date)::date AS cohort_month,
+            (EXTRACT(YEAR FROM c.order_date) - EXTRACT(YEAR FROM fp.first_date)) * 12
+            + (EXTRACT(MONTH FROM c.order_date) - EXTRACT(MONTH FROM fp.first_date)) AS month_offset
+        FROM first_purchase fp
+        JOIN completed c ON c.customer_id = fp.customer_id
+    )
+    SELECT
+        cohort_month,
+        month_offset::int AS month_offset,
+        COUNT(DISTINCT customer_id) AS customers
+    FROM cohort_data
+    WHERE month_offset BETWEEN 0 AND 12
+    GROUP BY cohort_month, month_offset
+    ORDER BY cohort_month, month_offset
+""")
+
+if not _cohort_df.empty:
+    _cohort_sizes = _cohort_df[_cohort_df["month_offset"] == 0].set_index("cohort_month")["customers"]
+
+    _cohort_pivot = _cohort_df.pivot_table(
+        index="cohort_month", columns="month_offset", values="customers", fill_value=0
+    )
+
+    _cohort_pct = _cohort_pivot.copy()
+    for col in _cohort_pct.columns:
+        _cohort_pct[col] = (_cohort_pct[col] / _cohort_sizes * 100).round(1)
+
+    _cohort_pct.index = pd.to_datetime(_cohort_pct.index).strftime("%b %Y")
+    _cohort_pct.columns = [f"M{int(c)}" for c in _cohort_pct.columns]
+
+    _cohort_pct.insert(0, "Cohort", _cohort_sizes.values)
+    _cohort_pct = _cohort_pct.rename_axis("Mês 1ª compra")
+
+    _c_tab1, _c_tab2 = st.tabs(["Tabela (%)", "Heatmap"])
+
+    with _c_tab1:
+        _col_cfg = {"Cohort": st.column_config.NumberColumn("Cohort (n)", format="%,.0f")}
+        for c in [c for c in _cohort_pct.columns if c.startswith("M") and c != "M0"]:
+            _col_cfg[c] = st.column_config.NumberColumn(c, format="%.1f%%")
+        _col_cfg["M0"] = st.column_config.NumberColumn("M0", format="%.1f%%")
+        st.dataframe(_cohort_pct, use_container_width=True, column_config=_col_cfg)
+        st.caption("M0 = mês da 1ª compra · M1 = mês seguinte · valores em % do cohort original")
+
+    with _c_tab2:
+        _heat_data = _cohort_pct.drop(columns="Cohort")
+        _heat_data = _heat_data.drop(columns="M0", errors="ignore")
+
+        fig_cohort = go.Figure(data=go.Heatmap(
+            z=_heat_data.values,
+            x=_heat_data.columns.tolist(),
+            y=_heat_data.index.tolist(),
+            colorscale=[[0, "#fef2f2"], [0.15, "#fca5a5"], [0.35, "#f87171"], [0.6, "#dc2626"], [1, "#7f1d1d"]],
+            text=[[f"{v:.1f}%" if v > 0 else "" for v in row] for row in _heat_data.values],
+            texttemplate="%{text}",
+            textfont={"size": 11},
+            hovertemplate="Cohort: %{y}<br>Mês: %{x}<br>Retenção: %{z:.1f}%<extra></extra>",
+            colorbar=dict(title="%", ticksuffix="%"),
+        ))
+        fig_cohort.update_layout(
+            height=max(350, len(_heat_data) * 28 + 80),
+            margin=dict(l=0, r=0, t=10, b=0),
+            xaxis_title="Meses após 1ª compra",
+            yaxis_title="",
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_cohort, use_container_width=True)
+        st.caption("Vermelho mais escuro = maior retenção. Linhas recentes com poucos meses é normal (dados ainda em formação).")
+else:
+    st.info("Sem dados suficientes para gerar o cohort de retenção.")
+
+st.divider()
+
 # ── Antiguidade da Base ───────────────────────────────────────────────────────
 
 section("Antiguidade da Base", "Há quanto tempo cada grupo de clientes está cadastrado.")
