@@ -286,6 +286,129 @@ _g4.metric("📊 Mês atual vs anterior",
 
 st.divider()
 
+# ── GA4 — Tráfego do site ─────────────────────────────────────────────────────
+
+section("Tráfego do site (GA4)",
+        "Sessões e usuários únicos dos últimos 30 dias, direto do Google Analytics 4.")
+
+@st.cache_data(ttl=3600)
+def _ga4_traffic():
+    try:
+        import json
+        from google.analytics.data_v1beta import BetaAnalyticsDataClient
+        from google.analytics.data_v1beta.types import RunReportRequest, DateRange, Metric, Dimension, OrderBy
+        from google.oauth2 import service_account
+
+        # Carrega credenciais — local via arquivo, Cloud via secrets
+        if "ga4_credentials" in st.secrets:
+            info = json.loads(st.secrets["ga4_credentials"])
+            creds = service_account.Credentials.from_service_account_info(
+                info, scopes=["https://www.googleapis.com/auth/analytics.readonly"]
+            )
+        else:
+            creds = service_account.Credentials.from_service_account_file(
+                Path(__file__).parent / "ga4_credentials.json",
+                scopes=["https://www.googleapis.com/auth/analytics.readonly"]
+            )
+
+        client = BetaAnalyticsDataClient(credentials=creds)
+
+        # Tráfego diário — últimos 30 dias
+        req = RunReportRequest(
+            property="properties/317505119",
+            date_ranges=[DateRange(start_date="30daysAgo", end_date="today")],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="totalUsers"),
+                Metric(name="conversions"),
+            ],
+            dimensions=[Dimension(name="date")],
+            order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date"))]
+        )
+        resp = client.run_report(req)
+        rows = []
+        for row in resp.rows:
+            d = row.dimension_values[0].value
+            rows.append({
+                "data": pd.to_datetime(d, format="%Y%m%d"),
+                "sessoes": int(row.metric_values[0].value),
+                "usuarios": int(row.metric_values[1].value),
+                "conversoes": int(row.metric_values[2].value),
+            })
+        df = pd.DataFrame(rows)
+
+        # Totais do período
+        req_total = RunReportRequest(
+            property="properties/317505119",
+            date_ranges=[
+                DateRange(start_date="30daysAgo", end_date="today"),
+                DateRange(start_date="60daysAgo", end_date="31daysAgo"),
+            ],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="totalUsers"),
+                Metric(name="bounceRate"),
+                Metric(name="averageSessionDuration"),
+            ],
+        )
+        resp_total = client.run_report(req_total)
+        totais = {}
+        for row in resp_total.rows:
+            period = row.dimension_values[0].value if resp_total.dimension_headers else "date_range_0"
+            idx = 0 if "0" in str(row.dimension_values) else 1
+            totais[idx] = {
+                "sessoes":  int(row.metric_values[0].value),
+                "usuarios": int(row.metric_values[1].value),
+                "bounce":   float(row.metric_values[2].value) * 100,
+                "duracao":  float(row.metric_values[3].value),
+            }
+
+        return df, totais
+    except Exception as e:
+        return None, {"error": str(e)}
+
+_ga4_df, _ga4_totais = _ga4_traffic()
+
+if _ga4_df is not None and not _ga4_df.empty:
+    _t0 = _ga4_totais.get(0, {})
+    _t1 = _ga4_totais.get(1, {})
+
+    _ga1, _ga2, _ga3, _ga4_col = st.columns(4)
+    _delta_sess = _t0.get("sessoes", 0) - _t1.get("sessoes", 0)
+    _delta_usr  = _t0.get("usuarios", 0) - _t1.get("usuarios", 0)
+    _ga1.metric("🌐 Sessões (30d)",   f"{_t0.get('sessoes',0):,.0f}",
+                f"{'+' if _delta_sess>=0 else ''}{_delta_sess:,.0f} vs 30d anteriores",
+                delta_color="normal" if _delta_sess >= 0 else "inverse")
+    _ga2.metric("👤 Usuários (30d)",  f"{_t0.get('usuarios',0):,.0f}",
+                f"{'+' if _delta_usr>=0 else ''}{_delta_usr:,.0f} vs 30d anteriores",
+                delta_color="normal" if _delta_usr >= 0 else "inverse")
+    _ga3.metric("📉 Taxa de rejeição", f"{_t0.get('bounce',0):.1f}%", delta_color="off")
+    _ga4_col.metric("⏱️ Duração média", f"{int(_t0.get('duracao',0)//60)}m{int(_t0.get('duracao',0)%60)}s", delta_color="off")
+
+    br()
+
+    fig_ga4 = go.Figure()
+    fig_ga4.add_trace(go.Bar(
+        x=_ga4_df["data"], y=_ga4_df["sessoes"],
+        name="Sessões", marker_color="#818cf8", opacity=0.8
+    ))
+    fig_ga4.add_trace(go.Scatter(
+        x=_ga4_df["data"], y=_ga4_df["usuarios"],
+        name="Usuários únicos", line=dict(color="#f43f5e", width=2), mode="lines"
+    ))
+    fig_ga4.update_layout(
+        height=240, margin=dict(l=0, r=0, t=10, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="x unified", plot_bgcolor="white",
+        yaxis=dict(gridcolor="#f1f5f9"),
+    )
+    st.plotly_chart(fig_ga4, use_container_width=True)
+    st.caption("Dados do Google Analytics 4 — atualizado a cada hora")
+elif "error" in _ga4_totais:
+    st.warning(f"GA4 indisponível: {_ga4_totais['error']}")
+
+st.divider()
+
 # ── Vendas: dia / semana / mês ────────────────────────────────────────────────
 
 section("Vendas por período",
