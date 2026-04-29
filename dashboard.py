@@ -313,6 +313,7 @@ def _ga4_traffic():
 
         client = BetaAnalyticsDataClient(credentials=creds)
 
+        # Tráfego diário 90 dias
         req = RunReportRequest(
             property="properties/317505119",
             date_ranges=[DateRange(start_date="89daysAgo", end_date="today")],
@@ -330,6 +331,7 @@ def _ga4_traffic():
                 "usuarios": int(row.metric_values[1].value),
             })
 
+        # Totais 30d vs 30d anterior
         req_total = RunReportRequest(
             property="properties/317505119",
             date_ranges=[
@@ -354,11 +356,28 @@ def _ga4_traffic():
                 "duracao":  float(row.metric_values[3].value),
             }
 
-        return pd.DataFrame(rows), totais
-    except Exception as e:
-        return None, {"error": str(e)}
+        # Tráfego por canal (30 dias)
+        req_canal = RunReportRequest(
+            property="properties/317505119",
+            date_ranges=[DateRange(start_date="30daysAgo", end_date="today")],
+            metrics=[Metric(name="sessions"), Metric(name="totalUsers")],
+            dimensions=[Dimension(name="sessionDefaultChannelGroup")],
+            order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)]
+        )
+        resp_canal = client.run_report(req_canal)
+        canais = []
+        for row in resp_canal.rows:
+            canais.append({
+                "canal":    row.dimension_values[0].value,
+                "sessoes":  int(row.metric_values[0].value),
+                "usuarios": int(row.metric_values[1].value),
+            })
 
-_ga4_df, _ga4_totais = _ga4_traffic()
+        return pd.DataFrame(rows), totais, pd.DataFrame(canais)
+    except Exception as e:
+        return None, {"error": str(e)}, None
+
+_ga4_df, _ga4_totais, _ga4_canais = _ga4_traffic()
 
 # Vendas diárias do WooCommerce (últimos 90 dias)
 _vendas_diarias = query("""
@@ -377,69 +396,101 @@ if _ga4_df is not None and not _ga4_df.empty:
     _t0 = _ga4_totais.get(0, {})
     _t1 = _ga4_totais.get(1, {})
 
-    # KPIs
-    _ga1, _ga2, _ga3, _ga4_col = st.columns(4)
-    _delta_sess = _t0.get("sessoes", 0) - _t1.get("sessoes", 0)
-    _delta_usr  = _t0.get("usuarios", 0) - _t1.get("usuarios", 0)
-    _ga1.metric("🌐 Sessões (30d)", f"{_t0.get('sessoes',0):,.0f}",
-                f"{'+' if _delta_sess>=0 else ''}{_delta_sess:,.0f} vs 30d anteriores",
-                delta_color="normal" if _delta_sess >= 0 else "inverse")
-    _ga2.metric("👤 Usuários (30d)", f"{_t0.get('usuarios',0):,.0f}",
-                f"{'+' if _delta_usr>=0 else ''}{_delta_usr:,.0f} vs 30d anteriores",
-                delta_color="normal" if _delta_usr >= 0 else "inverse")
-    _ga3.metric("📉 Taxa de rejeição", f"{_t0.get('bounce',0):.1f}%", delta_color="off")
-    _ga4_col.metric("⏱️ Duração média",
-                    f"{int(_t0.get('duracao',0)//60)}m{int(_t0.get('duracao',0)%60)}s",
-                    delta_color="off")
-
-    br()
-
     # Merge GA4 + WooCommerce
     _merged = pd.merge(_ga4_df, _vendas_diarias, on="data", how="outer").sort_values("data")
     _merged["sessoes"]  = _merged["sessoes"].fillna(0)
     _merged["receita"]  = _merged["receita"].fillna(0)
     _merged["pedidos"]  = _merged["pedidos"].fillna(0)
+    _merged["conv_rate"] = (_merged["pedidos"] / _merged["sessoes"].replace(0, float("nan")) * 100).round(2)
 
-    # Gráfico eixo duplo — sessões (barras) + receita (linha)
-    fig_cruzado = go.Figure()
+    # KPIs — últimos 30 dias do merged
+    _m30 = _merged[_merged["data"] >= pd.Timestamp.now() - pd.Timedelta(days=30)]
+    _sess_30   = int(_t0.get("sessoes", 0))
+    _sess_ant  = int(_t1.get("sessoes", 0))
+    _ped_30    = int(_m30["pedidos"].sum())
+    _rec_30    = float(_m30["receita"].sum())
+    _conv_30   = round(_ped_30 / _sess_30 * 100, 2) if _sess_30 > 0 else 0
+    _delta_sess = _sess_30 - _sess_ant
 
-    fig_cruzado.add_trace(go.Bar(
-        x=_merged["data"], y=_merged["sessoes"],
-        name="Sessões (GA4)", marker_color="#818cf8", opacity=0.6,
-        yaxis="y1",
-        hovertemplate="%{x|%d/%m}<br>Sessões: %{y:,.0f}<extra></extra>"
-    ))
-    fig_cruzado.add_trace(go.Scatter(
-        x=_merged["data"], y=_merged["receita"],
-        name="Receita (R$)", line=dict(color="#f43f5e", width=2.5),
-        mode="lines", yaxis="y2",
-        hovertemplate="%{x|%d/%m}<br>Receita: R$ %{y:,.0f}<extra></extra>"
-    ))
-    fig_cruzado.add_trace(go.Scatter(
-        x=_merged["data"], y=_merged["pedidos"],
-        name="Pedidos", line=dict(color="#f97316", width=1.5, dash="dot"),
-        mode="lines", yaxis="y2",
-        hovertemplate="%{x|%d/%m}<br>Pedidos: %{y:.0f}<extra></extra>"
-    ))
+    _ga1, _ga2, _ga3, _ga4_col, _ga5 = st.columns(5)
+    _ga1.metric("🌐 Sessões (30d)", f"{_sess_30:,.0f}",
+                f"{'+' if _delta_sess>=0 else ''}{_delta_sess:,.0f} vs 30d anteriores",
+                delta_color="normal" if _delta_sess >= 0 else "inverse")
+    _ga2.metric("👤 Usuários (30d)", f"{_t0.get('usuarios',0):,.0f}", delta_color="off")
+    _ga3.metric("📉 Rejeição", f"{_t0.get('bounce',0):.1f}%", delta_color="off")
+    _ga4_col.metric("⏱️ Duração média",
+                    f"{int(_t0.get('duracao',0)//60)}m{int(_t0.get('duracao',0)%60)}s",
+                    delta_color="off")
+    _ga5.metric("🛒 Taxa de conversão", f"{_conv_30:.2f}%",
+                f"{_ped_30} pedidos de {_sess_30:,.0f} sessões", delta_color="off")
 
-    fig_cruzado.update_layout(
-        height=300,
-        margin=dict(l=0, r=60, t=10, b=0),
-        hovermode="x unified",
-        plot_bgcolor="white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        yaxis=dict(
-            title="Sessões", gridcolor="#f1f5f9",
-            title_font=dict(color="#818cf8"), tickfont=dict(color="#818cf8")
-        ),
-        yaxis2=dict(
-            title="R$ / Pedidos", overlaying="y", side="right",
-            title_font=dict(color="#f43f5e"), tickfont=dict(color="#f43f5e"),
-            showgrid=False,
-        ),
-    )
-    st.plotly_chart(fig_cruzado, use_container_width=True)
-    st.caption("Barras = sessões do site (GA4) · Linha vermelha = receita · Linha laranja pontilhada = pedidos — últimos 90 dias")
+    br()
+
+    _tab_cruzado, _tab_canal = st.tabs(["📈 Tráfego × Vendas", "📡 Por canal"])
+
+    with _tab_cruzado:
+        fig_cruzado = go.Figure()
+        fig_cruzado.add_trace(go.Bar(
+            x=_merged["data"], y=_merged["sessoes"],
+            name="Sessões (GA4)", marker_color="#818cf8", opacity=0.6,
+            yaxis="y1",
+            hovertemplate="%{x|%d/%m}<br>Sessões: %{y:,.0f}<extra></extra>"
+        ))
+        fig_cruzado.add_trace(go.Scatter(
+            x=_merged["data"], y=_merged["receita"],
+            name="Receita (R$)", line=dict(color="#f43f5e", width=2.5),
+            mode="lines", yaxis="y2",
+            hovertemplate="%{x|%d/%m}<br>Receita: R$ %{y:,.0f}<extra></extra>"
+        ))
+        fig_cruzado.add_trace(go.Scatter(
+            x=_merged["data"], y=_merged["conv_rate"],
+            name="Conversão (%)", line=dict(color="#10b981", width=1.5, dash="dot"),
+            mode="lines", yaxis="y2",
+            hovertemplate="%{x|%d/%m}<br>Conversão: %{y:.2f}%<extra></extra>"
+        ))
+        fig_cruzado.update_layout(
+            height=300, margin=dict(l=0, r=60, t=10, b=0),
+            hovermode="x unified", plot_bgcolor="white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            yaxis=dict(title="Sessões", gridcolor="#f1f5f9",
+                       title_font=dict(color="#818cf8"), tickfont=dict(color="#818cf8")),
+            yaxis2=dict(title="R$ / %", overlaying="y", side="right",
+                        title_font=dict(color="#f43f5e"), tickfont=dict(color="#f43f5e"),
+                        showgrid=False),
+        )
+        st.plotly_chart(fig_cruzado, use_container_width=True)
+        st.caption("Barras = sessões · Linha vermelha = receita · Linha verde = taxa de conversão (pedidos/sessões) — 90 dias")
+
+    with _tab_canal:
+        if _ga4_canais is not None and not _ga4_canais.empty:
+            _total_sess_canal = _ga4_canais["sessoes"].sum()
+            _ga4_canais["pct"] = (_ga4_canais["sessoes"] / _total_sess_canal * 100).round(1)
+
+            _canal_colors = {
+                "Organic Search": "#10b981", "Paid Search": "#f59e0b",
+                "Direct": "#818cf8", "Email": "#f43f5e",
+                "Organic Social": "#06b6d4", "Paid Social": "#8b5cf6",
+                "Referral": "#64748b", "Unassigned": "#cbd5e1",
+            }
+            _cores = [_canal_colors.get(c, "#94a3b8") for c in _ga4_canais["canal"]]
+
+            fig_canal = go.Figure()
+            fig_canal.add_trace(go.Bar(
+                x=_ga4_canais["sessoes"], y=_ga4_canais["canal"],
+                orientation="h", marker_color=_cores, opacity=0.85,
+                text=[f"{p:.1f}%" for p in _ga4_canais["pct"]],
+                textposition="outside",
+                hovertemplate="%{y}<br>Sessões: %{x:,.0f}<extra></extra>"
+            ))
+            fig_canal.update_layout(
+                height=max(250, len(_ga4_canais) * 38 + 60),
+                margin=dict(l=0, r=60, t=10, b=0),
+                plot_bgcolor="white",
+                xaxis=dict(gridcolor="#f1f5f9"),
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(fig_canal, use_container_width=True)
+            st.caption("Origem das sessões dos últimos 30 dias — % do total de tráfego")
 
 elif "error" in _ga4_totais:
     st.warning(f"GA4 indisponível: {_ga4_totais['error']}")
