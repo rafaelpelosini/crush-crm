@@ -373,14 +373,17 @@ def _ga4_traffic():
                 "usuarios": int(row.metric_values[1].value),
             })
 
-        # Campanhas (90 dias)
+        # Campanhas (30 dias) — com custo e receita
         req_camp = RunReportRequest(
             property="properties/317505119",
-            date_ranges=[DateRange(start_date="89daysAgo", end_date="today")],
+            date_ranges=[DateRange(start_date="29daysAgo", end_date="today")],
             metrics=[
                 Metric(name="sessions"),
                 Metric(name="totalUsers"),
                 Metric(name="averageSessionDuration"),
+                Metric(name="advertiserAdCost"),
+                Metric(name="purchaseRevenue"),
+                Metric(name="transactions"),
             ],
             dimensions=[
                 Dimension(name="sessionCampaignName"),
@@ -388,23 +391,35 @@ def _ga4_traffic():
                 Dimension(name="sessionMedium"),
             ],
             order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
-            limit=30,
+            limit=40,
         )
         resp_camp = client.run_report(req_camp)
         campanhas = []
         for row in resp_camp.rows:
-            nome   = row.dimension_values[0].value
-            source = row.dimension_values[1].value
-            medium = row.dimension_values[2].value
+            nome    = row.dimension_values[0].value
+            source  = row.dimension_values[1].value
+            medium  = row.dimension_values[2].value
             if nome in ("(not set)", "(direct)", "(organic)"):
                 continue
+            sessoes  = int(row.metric_values[0].value)
+            usuarios = int(row.metric_values[1].value)
+            duracao  = float(row.metric_values[2].value)
+            custo    = float(row.metric_values[3].value)
+            receita  = float(row.metric_values[4].value)
+            pedidos  = int(row.metric_values[5].value)
             campanhas.append({
                 "campanha": nome,
                 "fonte":    source,
                 "medio":    medium,
-                "sessoes":  int(row.metric_values[0].value),
-                "usuarios": int(row.metric_values[1].value),
-                "duracao":  float(row.metric_values[2].value),
+                "sessoes":  sessoes,
+                "usuarios": usuarios,
+                "duracao":  duracao,
+                "custo":    custo,
+                "receita":  receita,
+                "pedidos":  pedidos,
+                "conv_pct": round(pedidos / sessoes * 100, 2) if sessoes > 0 else 0,
+                "roas":     round(receita / custo, 2) if custo > 0 else None,
+                "cpa":      round(custo / pedidos, 2) if pedidos > 0 and custo > 0 else None,
             })
 
         return pd.DataFrame(rows), totais, pd.DataFrame(canais), pd.DataFrame(campanhas)
@@ -529,52 +544,76 @@ if _ga4_df is not None and not _ga4_df.empty:
     with _tab_camp:
         if _ga4_campanhas is not None and not _ga4_campanhas.empty:
             _total_camp = _ga4_campanhas["sessoes"].sum()
-            _ga4_campanhas["pct"]    = (_ga4_campanhas["sessoes"] / _total_camp * 100).round(1)
-            _ga4_campanhas["dur_fmt"] = _ga4_campanhas["duracao"].apply(
-                lambda s: f"{int(s//60)}m{int(s%60)}s"
-            )
+            _ga4_campanhas["pct"] = (_ga4_campanhas["sessoes"] / _total_camp * 100).round(1)
 
-            # Filtro de fonte
-            _fontes = ["Todas"] + sorted(_ga4_campanhas["fonte"].unique().tolist())
-            _fonte_sel = st.selectbox("Filtrar por fonte", _fontes, key="camp_fonte")
-            _df_camp = _ga4_campanhas if _fonte_sel == "Todas" else _ga4_campanhas[_ga4_campanhas["fonte"] == _fonte_sel]
+            # Filtros
+            _cf1, _cf2 = st.columns(2)
+            _fontes    = ["Todas"] + sorted(_ga4_campanhas["fonte"].unique().tolist())
+            _fonte_sel = _cf1.selectbox("Fonte", _fontes, key="camp_fonte")
+            _ordem_sel = _cf2.selectbox("Ordenar por", ["Sessões","Receita","Conversão (%)","ROAS","CPA"], key="camp_ordem")
+            _ordem_col = {"Sessões":"sessoes","Receita":"receita","Conversão (%)":"conv_pct","ROAS":"roas","CPA":"cpa"}[_ordem_sel]
 
-            # Gráfico horizontal
-            _df_camp_plot = _df_camp.head(15).sort_values("sessoes")
-            _camp_labels  = _df_camp_plot["campanha"].str[:50]  # trunca nomes longos
+            _df_camp = _ga4_campanhas.copy()
+            if _fonte_sel != "Todas":
+                _df_camp = _df_camp[_df_camp["fonte"] == _fonte_sel]
+            _df_camp = _df_camp.sort_values(_ordem_col, ascending=False, na_position="last")
+
+            # KPIs do filtro selecionado
+            _ck1, _ck2, _ck3, _ck4 = st.columns(4)
+            _ck1.metric("Sessões", f"{int(_df_camp['sessoes'].sum()):,.0f}")
+            _ck2.metric("Receita atribuída", f"R$ {_df_camp['receita'].sum():,.0f}")
+            _ck3.metric("Pedidos", f"{int(_df_camp['pedidos'].sum()):,.0f}")
+            _custo_tot = _df_camp['custo'].sum()
+            _rec_tot   = _df_camp['receita'].sum()
+            _ck4.metric("ROAS Google", f"{_rec_tot/_custo_tot:.1f}x" if _custo_tot > 0 else "—")
+
+            br()
+
+            # Gráfico — barras coloridas por métrica escolhida
+            _df_plot = _df_camp.head(15).sort_values(_ordem_col, na_position="last")
+            _vals    = _df_plot[_ordem_col].fillna(0)
+            _labels  = _df_plot["campanha"].str[:45]
 
             fig_camp = go.Figure()
             fig_camp.add_trace(go.Bar(
-                x=_df_camp_plot["sessoes"], y=_camp_labels,
+                x=_vals, y=_labels,
                 orientation="h", marker_color="#818cf8", opacity=0.8,
-                text=[f"{p:.1f}%" for p in _df_camp_plot["pct"]],
+                text=[
+                    f"R$ {v:,.0f}" if _ordem_col in ("receita","cpa") else
+                    f"{v:.2f}%" if _ordem_col == "conv_pct" else
+                    f"{v:.1f}x" if _ordem_col == "roas" else
+                    f"{v:,.0f}"
+                    for v in _vals
+                ],
                 textposition="outside",
-                hovertemplate="<b>%{y}</b><br>Sessões: %{x:,.0f}<extra></extra>"
+                hovertemplate="<b>%{y}</b><br>" + _ordem_sel + ": %{x}<extra></extra>"
             ))
             fig_camp.update_layout(
-                height=max(300, len(_df_camp_plot) * 36 + 60),
-                margin=dict(l=0, r=80, t=10, b=0),
+                height=max(300, len(_df_plot) * 36 + 60),
+                margin=dict(l=0, r=100, t=10, b=0),
                 plot_bgcolor="white",
                 xaxis=dict(gridcolor="#f1f5f9"),
                 yaxis=dict(autorange="reversed"),
             )
             st.plotly_chart(fig_camp, use_container_width=True)
 
-            # Tabela detalhada
+            # Tabela completa
+            _df_tbl = _df_camp[["campanha","fonte","sessoes","pedidos","conv_pct","receita","custo","roas","cpa"]].copy()
+            _df_tbl.columns = ["Campanha","Fonte","Sessões","Pedidos","Conv (%)","Receita","Custo","ROAS","CPA"]
             st.dataframe(
-                _df_camp[["campanha","fonte","medio","sessoes","usuarios","dur_fmt","pct"]].rename(columns={
-                    "campanha": "Campanha", "fonte": "Fonte", "medio": "Meio",
-                    "sessoes": "Sessões", "usuarios": "Usuários",
-                    "dur_fmt": "Duração média", "pct": "% do tráfego"
-                }),
+                _df_tbl,
                 hide_index=True, use_container_width=True,
                 column_config={
-                    "Sessões":  st.column_config.NumberColumn("Sessões", format="%,.0f"),
-                    "Usuários": st.column_config.NumberColumn("Usuários", format="%,.0f"),
-                    "% do tráfego": st.column_config.NumberColumn("% tráfego", format="%.1f%%"),
+                    "Sessões":   st.column_config.NumberColumn("Sessões",   format="%,.0f"),
+                    "Pedidos":   st.column_config.NumberColumn("Pedidos",   format="%,.0f"),
+                    "Conv (%)":  st.column_config.NumberColumn("Conv (%)",  format="%.2f%%"),
+                    "Receita":   st.column_config.NumberColumn("Receita",   format="R$ %,.0f"),
+                    "Custo":     st.column_config.NumberColumn("Custo",     format="R$ %,.2f"),
+                    "ROAS":      st.column_config.NumberColumn("ROAS",      format="%.1f×"),
+                    "CPA":       st.column_config.NumberColumn("CPA",       format="R$ %,.2f"),
                 }
             )
-            st.caption("Campanhas dos últimos 90 dias ordenadas por sessões")
+            st.caption("Últimos 30 dias · Custo disponível apenas para Google Ads (integração nativa GA4) · Meta Ads sem custo no GA4")
 
 elif "error" in _ga4_totais:
     st.warning(f"GA4 indisponível: {_ga4_totais['error']}")
