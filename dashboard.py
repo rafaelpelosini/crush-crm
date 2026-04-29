@@ -373,11 +373,45 @@ def _ga4_traffic():
                 "usuarios": int(row.metric_values[1].value),
             })
 
-        return pd.DataFrame(rows), totais, pd.DataFrame(canais)
-    except Exception as e:
-        return None, {"error": str(e)}, None
+        # Campanhas (90 dias)
+        req_camp = RunReportRequest(
+            property="properties/317505119",
+            date_ranges=[DateRange(start_date="89daysAgo", end_date="today")],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="totalUsers"),
+                Metric(name="averageSessionDuration"),
+            ],
+            dimensions=[
+                Dimension(name="sessionCampaignName"),
+                Dimension(name="sessionSource"),
+                Dimension(name="sessionMedium"),
+            ],
+            order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
+            limit=30,
+        )
+        resp_camp = client.run_report(req_camp)
+        campanhas = []
+        for row in resp_camp.rows:
+            nome   = row.dimension_values[0].value
+            source = row.dimension_values[1].value
+            medium = row.dimension_values[2].value
+            if nome in ("(not set)", "(direct)", "(organic)"):
+                continue
+            campanhas.append({
+                "campanha": nome,
+                "fonte":    source,
+                "medio":    medium,
+                "sessoes":  int(row.metric_values[0].value),
+                "usuarios": int(row.metric_values[1].value),
+                "duracao":  float(row.metric_values[2].value),
+            })
 
-_ga4_df, _ga4_totais, _ga4_canais = _ga4_traffic()
+        return pd.DataFrame(rows), totais, pd.DataFrame(canais), pd.DataFrame(campanhas)
+    except Exception as e:
+        return None, {"error": str(e)}, None, None
+
+_ga4_df, _ga4_totais, _ga4_canais, _ga4_campanhas = _ga4_traffic()
 
 # Vendas diárias do WooCommerce (últimos 90 dias)
 _vendas_diarias = query("""
@@ -426,7 +460,7 @@ if _ga4_df is not None and not _ga4_df.empty:
 
     br()
 
-    _tab_cruzado, _tab_canal = st.tabs(["📈 Tráfego × Vendas", "📡 Por canal"])
+    _tab_cruzado, _tab_canal, _tab_camp = st.tabs(["📈 Tráfego × Vendas", "📡 Por canal", "🎯 Campanhas"])
 
     with _tab_cruzado:
         fig_cruzado = go.Figure()
@@ -491,6 +525,56 @@ if _ga4_df is not None and not _ga4_df.empty:
             )
             st.plotly_chart(fig_canal, use_container_width=True)
             st.caption("Origem das sessões dos últimos 30 dias — % do total de tráfego")
+
+    with _tab_camp:
+        if _ga4_campanhas is not None and not _ga4_campanhas.empty:
+            _total_camp = _ga4_campanhas["sessoes"].sum()
+            _ga4_campanhas["pct"]    = (_ga4_campanhas["sessoes"] / _total_camp * 100).round(1)
+            _ga4_campanhas["dur_fmt"] = _ga4_campanhas["duracao"].apply(
+                lambda s: f"{int(s//60)}m{int(s%60)}s"
+            )
+
+            # Filtro de fonte
+            _fontes = ["Todas"] + sorted(_ga4_campanhas["fonte"].unique().tolist())
+            _fonte_sel = st.selectbox("Filtrar por fonte", _fontes, key="camp_fonte")
+            _df_camp = _ga4_campanhas if _fonte_sel == "Todas" else _ga4_campanhas[_ga4_campanhas["fonte"] == _fonte_sel]
+
+            # Gráfico horizontal
+            _df_camp_plot = _df_camp.head(15).sort_values("sessoes")
+            _camp_labels  = _df_camp_plot["campanha"].str[:50]  # trunca nomes longos
+
+            fig_camp = go.Figure()
+            fig_camp.add_trace(go.Bar(
+                x=_df_camp_plot["sessoes"], y=_camp_labels,
+                orientation="h", marker_color="#818cf8", opacity=0.8,
+                text=[f"{p:.1f}%" for p in _df_camp_plot["pct"]],
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>Sessões: %{x:,.0f}<extra></extra>"
+            ))
+            fig_camp.update_layout(
+                height=max(300, len(_df_camp_plot) * 36 + 60),
+                margin=dict(l=0, r=80, t=10, b=0),
+                plot_bgcolor="white",
+                xaxis=dict(gridcolor="#f1f5f9"),
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(fig_camp, use_container_width=True)
+
+            # Tabela detalhada
+            st.dataframe(
+                _df_camp[["campanha","fonte","medio","sessoes","usuarios","dur_fmt","pct"]].rename(columns={
+                    "campanha": "Campanha", "fonte": "Fonte", "medio": "Meio",
+                    "sessoes": "Sessões", "usuarios": "Usuários",
+                    "dur_fmt": "Duração média", "pct": "% do tráfego"
+                }),
+                hide_index=True, use_container_width=True,
+                column_config={
+                    "Sessões":  st.column_config.NumberColumn("Sessões", format="%,.0f"),
+                    "Usuários": st.column_config.NumberColumn("Usuários", format="%,.0f"),
+                    "% do tráfego": st.column_config.NumberColumn("% tráfego", format="%.1f%%"),
+                }
+            )
+            st.caption("Campanhas dos últimos 90 dias ordenadas por sessões")
 
 elif "error" in _ga4_totais:
     st.warning(f"GA4 indisponível: {_ga4_totais['error']}")
