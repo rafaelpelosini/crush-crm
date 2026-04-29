@@ -293,9 +293,11 @@ with _aba_dia:
             COUNT(CASE WHEN cp.status_code = 'S0' THEN 1 END) AS dm_so_n,
 
             COUNT(CASE WHEN p.perfil_compra = 'feminino'
-                            AND cp.status_code IN ('S2','S3','S7','S6') THEN 1 END) AS dm_reativar_n,
+                            AND cp.status_code IN ('S2','S3','S7','S6')
+                            AND cp.valor_code != 'V1' THEN 1 END) AS dm_reativar_n,
             ROUND(SUM(CASE WHEN p.perfil_compra = 'feminino'
-                            AND cp.status_code IN ('S2','S3','S7','S6') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_reativar_rs,
+                            AND cp.status_code IN ('S2','S3','S7','S6')
+                            AND cp.valor_code != 'V1' THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_reativar_rs,
 
             -- Sub-segmentos Copa
             COUNT(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
@@ -436,7 +438,7 @@ with _aba_dia:
         int(_dqr["dm_reativar_n"] or 0), float(_dqr["dm_reativar_rs"] or 0),
         "Desconto 10% ou frete grátis",
         "\"Você lembrou de mim, eu lembro de você ♥\" — feriado como motivo pra voltar.",
-        f"status_code IN ('S2','S3','S7','S6') AND customer_id IN {_SUBQ_FEM}",
+        f"status_code IN ('S2','S3','S7','S6') AND valor_code != 'V1' AND customer_id IN {_SUBQ_FEM}",
         f"{_hoje_brt}_dm2_reativar_feminino.csv")
 
     _camp_card("dm_so", "09/05 · 💐 Dia das Mães", "#be185d", "Nunca comprou — 1ª compra",
