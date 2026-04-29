@@ -231,21 +231,32 @@ with _aba_dia:
 
     _hoje_brt = now_brt().date()
 
-    # ── Subquery de perfil de compra (feminino vs copa) ──────────────────────
-    # Feminino: tudo exceto Camisetas (Vestidos, Moletons, Calças, Bolsas, etc.)
-    # Copa: maioria Camisetas
+    # ── Subqueries de perfil (inline, sem WITH — compatível com csv_bytes) ──────
+    # Feminino: histórico majoritariamente não-camiseta
+    # Copa: histórico majoritariamente camiseta
+    _SUBQ_FEM = """(
+        SELECT o.customer_id FROM order_items oi
+        JOIN orders o ON o.woo_id = oi.order_id
+        GROUP BY o.customer_id
+        HAVING COUNT(CASE WHEN oi.category != 'Camisetas' THEN 1 END)
+            >= COUNT(CASE WHEN oi.category = 'Camisetas' THEN 1 END)
+    )"""
+    _SUBQ_COPA = """(
+        SELECT o.customer_id FROM order_items oi
+        JOIN orders o ON o.woo_id = oi.order_id
+        GROUP BY o.customer_id
+        HAVING COUNT(CASE WHEN oi.category = 'Camisetas' THEN 1 END)
+             > COUNT(CASE WHEN oi.category != 'Camisetas' THEN 1 END)
+    )"""
+    # Versão CTE para o query() principal de counts (pode usar WITH)
     _PERFIL_COMPRA = """
-        WITH _perfil AS (
-            SELECT o.customer_id,
-                COUNT(CASE WHEN oi.category != 'Camisetas' THEN 1 END) AS itens_fem,
-                COUNT(CASE WHEN oi.category = 'Camisetas'  THEN 1 END) AS itens_copa
-            FROM order_items oi
-            JOIN orders o ON o.woo_id = oi.order_id
-            GROUP BY o.customer_id
-        )
-        SELECT customer_id,
-            CASE WHEN itens_fem >= itens_copa THEN 'feminino' ELSE 'copa' END AS perfil_compra
-        FROM _perfil
+        SELECT o.customer_id,
+            CASE WHEN COUNT(CASE WHEN oi.category != 'Camisetas' THEN 1 END)
+                     >= COUNT(CASE WHEN oi.category = 'Camisetas' THEN 1 END)
+                 THEN 'feminino' ELSE 'copa' END AS perfil_compra
+        FROM order_items oi
+        JOIN orders o ON o.woo_id = oi.order_id
+        GROUP BY o.customer_id
     """
 
     # ── Counts gerais ────────────────────────────────────────────────────────
@@ -393,21 +404,21 @@ with _aba_dia:
         int(_dqr["dm_vip_n"] or 0), float(_dqr["dm_vip_rs"] or 0),
         "Sem desconto — acesso antecipado exclusivo",
         "\"Você é especial aqui. Antes de todo mundo.\" Pertencimento, não promoção.",
-        "(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino')",
+        f"(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN {_SUBQ_FEM}",
         f"{_hoje_brt}_dm1_vip_feminino.csv")
 
     _camp_card("dm_esf", "01/05 · 💐 Dia das Mães", "#be185d", "Esfriando VIP — perfil feminino",
         int(_dqr["dm_esf_n"] or 0), float(_dqr["dm_esf_rs"] or 0),
         "Desconto 10–15% + frete grátis",
         "\"A gente sente sua falta ♥\" — urgência real do feriado, tom caloroso.",
-        "status_code = 'S4' AND valor_code IN ('V1','V2','V3') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino')",
+        f"status_code = 'S4' AND valor_code IN ('V1','V2','V3') AND customer_id IN {_SUBQ_FEM}",
         f"{_hoje_brt}_dm1_esf_feminino.csv")
 
     _camp_card("copa_vip", "01/05 · ⚽ Copa", "#1d4ed8", "VIP + Fiéis — perfil camisetas",
         int(_dqr["copa_vip_n"] or 0), float(_dqr["copa_vip_rs"] or 0),
         "Early access — novo lançamento Copa 2026",
         "\"Você foi das primeiras a comprar seleção aqui. O próximo lançamento é seu antes.\"",
-        "(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'copa')",
+        f"(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN {_SUBQ_COPA}",
         f"{_hoje_brt}_copa1_vip.csv")
 
     br()
@@ -417,14 +428,14 @@ with _aba_dia:
         int(_dqr["dm_base_n"] or 0), float(_dqr["dm_base_rs"] or 0),
         "Desconto 10% ou frete grátis + oferta de boas-vindas para S0",
         "\"Que presente lindo você pode encontrar aqui.\" — feriado como gatilho universal.",
-        "status_code IN ('S2','S3','S7','S6','S0') AND (status_code = 'S0' OR customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino'))",
+        f"status_code IN ('S2','S3','S7','S6','S0') AND (status_code = 'S0' OR customer_id IN {_SUBQ_FEM})",
         f"{_hoje_brt}_dm2_base_feminino.csv")
 
     _camp_card("copa_base", "09/05 · ⚽ Copa", "#1d4ed8", "Base camisetas — lançamento Copa",
         int(_dqr["copa_base_n"] or 0), float(_dqr["copa_base_rs"] or 0),
         "Apresentar coleção Copa 2026 — sem desconto",
         "\"A Copa chegou. E a gente chegou junto.\" — lançamento como evento, não promoção.",
-        "status_code NOT IN ('S0') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'copa') AND NOT (status_code = 'S1' OR valor_code = 'V1')",
+        f"status_code != 'S0' AND customer_id IN {_SUBQ_COPA} AND NOT (status_code = 'S1' OR valor_code = 'V1')",
         f"{_hoje_brt}_copa2_base.csv")
 
     br()
