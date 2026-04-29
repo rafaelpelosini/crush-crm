@@ -260,7 +260,7 @@ with _aba_dia:
             COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2') THEN 1 END) AS esfriando_vip,
             COUNT(CASE WHEN status_code = 'S4' THEN 1 END) AS esfriando_total,
             COUNT(CASE WHEN status_code = 'S2' AND frequencia_code = 'F1'
-                       AND last_order_date >= CURRENT_DATE - 30 THEN 1 END) AS aguardando_2a,
+                       AND NULLIF(last_order_date,'')::date >= CURRENT_DATE - 30 THEN 1 END) AS aguardando_2a,
             COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS em_pausa,
             ROUND(100.0 * COUNT(CASE WHEN status_code = 'S6' THEN 1 END) / NULLIF(COUNT(*),0), 1) AS ghosting_pct
         FROM crm_profiles
