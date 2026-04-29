@@ -231,44 +231,98 @@ with _aba_dia:
 
     _hoje_brt = now_brt().date()
 
-    # ── Dados para campanha ──────────────────────────────────────────────────
-    _dq = query("""
+    # ── Subquery de perfil de compra (feminino vs copa) ──────────────────────
+    # Feminino: tudo exceto Camisetas (Vestidos, Moletons, Calças, Bolsas, etc.)
+    # Copa: maioria Camisetas
+    _PERFIL_COMPRA = """
+        WITH _perfil AS (
+            SELECT o.customer_id,
+                COUNT(CASE WHEN oi.category != 'Camisetas' THEN 1 END) AS itens_fem,
+                COUNT(CASE WHEN oi.category = 'Camisetas'  THEN 1 END) AS itens_copa
+            FROM order_items oi
+            JOIN orders o ON o.woo_id = oi.order_id
+            GROUP BY o.customer_id
+        )
+        SELECT customer_id,
+            CASE WHEN itens_fem >= itens_copa THEN 'feminino' ELSE 'copa' END AS perfil_compra
+        FROM _perfil
+    """
+
+    # ── Counts gerais ────────────────────────────────────────────────────────
+    _dq = query(f"""
+        WITH perfil AS ({_PERFIL_COMPRA})
         SELECT
-            COUNT(*) AS base_total,
+            COUNT(cp.*) AS base_total,
 
-            COUNT(CASE WHEN status_code = 'S1' OR valor_code = 'V1' THEN 1 END) AS vip_fieis_n,
-            ROUND(SUM(CASE WHEN status_code = 'S1' OR valor_code = 'V1' THEN total_spent ELSE 0 END)::numeric,0) AS vip_fieis_rs,
+            -- Arte Dia das Mães: perfil feminino + S0
+            COUNT(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0') THEN 1 END) AS dm_n,
+            ROUND(SUM(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_rs,
 
-            COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN 1 END) AS esf_vip_n,
-            ROUND(SUM(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN total_spent ELSE 0 END)::numeric,0) AS esf_vip_rs,
+            -- Arte Copa: perfil copa (excluindo S0 já cobertos acima)
+            COUNT(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0' THEN 1 END) AS copa_n,
+            ROUND(SUM(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0' THEN cp.total_spent ELSE 0 END)::numeric,0) AS copa_rs,
 
-            COUNT(CASE WHEN status_code = 'S2' THEN 1 END) AS novo_n,
-            ROUND(SUM(CASE WHEN status_code = 'S2' THEN total_spent ELSE 0 END)::numeric,0) AS novo_rs,
+            -- Sub-segmentos Dia das Mães
+            COUNT(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND (cp.status_code = 'S1' OR cp.valor_code = 'V1') THEN 1 END) AS dm_vip_n,
+            ROUND(SUM(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND (cp.status_code = 'S1' OR cp.valor_code = 'V1') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_vip_rs,
 
-            COUNT(CASE WHEN personalidade_code = 'P3' AND recencia_code IN ('R1','R2') THEN 1 END) AS promissor_n,
-            ROUND(SUM(CASE WHEN personalidade_code = 'P3' AND recencia_code IN ('R1','R2') THEN total_spent ELSE 0 END)::numeric,0) AS promissor_rs,
+            COUNT(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND cp.status_code = 'S4' AND cp.valor_code IN ('V1','V2','V3') THEN 1 END) AS dm_esf_n,
+            ROUND(SUM(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND cp.status_code = 'S4' AND cp.valor_code IN ('V1','V2','V3') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_esf_rs,
 
-            COUNT(CASE WHEN status_code IN ('S3','S7','S6') THEN 1 END) AS reativar_n,
-            ROUND(SUM(CASE WHEN status_code IN ('S3','S7','S6') THEN total_spent ELSE 0 END)::numeric,0) AS reativar_rs,
+            COUNT(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND cp.status_code IN ('S2','S3','S7','S6','S0') THEN 1 END) AS dm_base_n,
+            ROUND(SUM(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
+                            AND cp.status_code IN ('S2','S3','S7','S6','S0') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_base_rs,
 
-            COUNT(CASE WHEN status_code = 'S0' THEN 1 END) AS so_n
-        FROM crm_profiles
+            -- Sub-segmentos Copa
+            COUNT(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
+                            AND (cp.status_code = 'S1' OR cp.valor_code = 'V1') THEN 1 END) AS copa_vip_n,
+            ROUND(SUM(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
+                            AND (cp.status_code = 'S1' OR cp.valor_code = 'V1') THEN cp.total_spent ELSE 0 END)::numeric,0) AS copa_vip_rs,
+
+            COUNT(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
+                            AND cp.status_code NOT IN ('S1') AND cp.valor_code NOT IN ('V1') THEN 1 END) AS copa_base_n,
+            ROUND(SUM(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
+                            AND cp.status_code NOT IN ('S1') AND cp.valor_code NOT IN ('V1') THEN cp.total_spent ELSE 0 END)::numeric,0) AS copa_base_rs
+
+        FROM crm_profiles cp
+        LEFT JOIN perfil p ON p.customer_id = cp.customer_id
     """)
     _dqr = _dq.iloc[0]
     _base_total = int(_dqr["base_total"] or 0)
+    _dm_n   = int(_dqr["dm_n"] or 0)
+    _copa_n = int(_dqr["copa_n"] or 0)
 
     # ── Banner ───────────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#be185d,#9d174d);border-radius:16px;
+    <div style="background:linear-gradient(135deg,#be185d,#1d4ed8);border-radius:16px;
                 padding:28px 32px;margin-bottom:28px;color:white">
       <div style="font-size:0.8rem;opacity:0.8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">
-        Campanha ativa
+        Campanhas ativas — semana de 29/04
       </div>
-      <div style="font-size:1.8rem;font-weight:800;margin-bottom:8px">💐 Dia das Mães — 11 de Maio</div>
-      <div style="font-size:0.95rem;opacity:0.9;line-height:1.65">
-        Base completa: <b>{_base_total:,} pessoas</b> · 2 disparos · mensagem adaptada por segmento.<br>
-        Custo de email baixo = manda para todo mundo. A segmentação serve para personalizar, não excluir.
+      <div style="font-size:1.8rem;font-weight:800;margin-bottom:10px">
+        💐 Dia das Mães &nbsp;·&nbsp; ⚽ Copa 2026
       </div>
+      <div style="display:flex;gap:32px;font-size:0.9rem;opacity:0.95">
+        <div><b>{_dm_n:,}</b> recebem arte feminina — Dia das Mães</div>
+        <div><b>{_copa_n:,}</b> recebem arte de Copa</div>
+        <div><b>{_base_total:,}</b> total coberto</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Lógica de split ───────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                padding:14px 20px;margin-bottom:24px;font-size:0.84rem;color:#475569;line-height:1.7">
+    <b>Critério de split por arte:</b><br>
+    💐 <b>Dia das Mães</b> → quem tem histórico majoritário em peças femininas
+    (vestidos, moletons, calças, bolsas, body, macacões…) + quem nunca comprou (S0)<br>
+    ⚽ <b>Copa</b> → quem tem histórico majoritário em camisetas
     </div>
     """, unsafe_allow_html=True)
 
@@ -276,39 +330,33 @@ with _aba_dia:
     st.markdown("#### 📅 Calendário")
     _cal1, _cal2 = st.columns(2)
 
-    _cal1.markdown("""
-    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2;height:100%">
+    _cal1.markdown(f"""
+    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2">
       <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
-                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 1 — Quinta, 30/04</div>
-      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:10px">
-        Abertura de temporada — segmentos quentes
-      </div>
+                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 1 — Quinta, 01/05</div>
+      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:8px">Segmentos quentes — ambas as artes</div>
       <div style="font-size:0.82rem;color:#64748b;line-height:1.7">
-        <b>VIP + Fiéis</b> → acesso antecipado, sem desconto<br>
-        <b>Esfriando VIP</b> → "sentimos sua falta" + desconto real<br>
+        💐 <b>DM — VIP + Fiéis femininas</b> → acesso antecipado, sem desconto<br>
+        💐 <b>DM — Esfriando VIP femininas</b> → desconto 10–15% + frete<br>
+        ⚽ <b>Copa — VIP + Fiéis camisetas</b> → early access novo lançamento<br>
       </div>
     </div>""", unsafe_allow_html=True)
 
-    _cal2.markdown("""
-    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2;height:100%">
-      <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
+    _cal2.markdown(f"""
+    <div style="border:2px solid #93c5fd;border-radius:12px;padding:20px 22px;background:#eff6ff">
+      <div style="font-size:0.7rem;font-weight:700;color:#1d4ed8;text-transform:uppercase;
                   letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 2 — Sábado, 09/05</div>
-      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:10px">
-        Base completa — mensagem por perfil
-      </div>
+      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:8px">Base completa — arte por perfil</div>
       <div style="font-size:0.82rem;color:#64748b;line-height:1.7">
-        <b>Novo Crush + Promissor</b> → curadoria, 2ª compra<br>
-        <b>Morno + Em Pausa + Ghosting</b> → reativação com feriado<br>
-        <b>Só Olhando</b> → convite de primeira compra<br>
+        💐 <b>DM — Base feminina</b> → reativação + 1ª compra + Só Olhando<br>
+        ⚽ <b>Copa — Base camisetas</b> → reativação com lançamento Copa<br>
       </div>
     </div>""", unsafe_allow_html=True)
 
     br()
 
-    # ── Listas ───────────────────────────────────────────────────────────────
-    st.markdown("#### 📋 Listas para exportar")
-
-    def _camp_card(key, disparo, titulo, n, receita, oferta, tom, filtro, arquivo):
+    # ── Cards de lista ────────────────────────────────────────────────────────
+    def _camp_card(key, disparo, cor_borda, titulo, n, receita, oferta, tom, filtro, arquivo):
         receita_html = (
             f'<span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;'
             f'padding:2px 10px;font-size:0.75rem;font-weight:600;color:#16a34a">'
@@ -317,11 +365,11 @@ with _aba_dia:
         _cl, _cr = st.columns([5, 1])
         with _cl:
             st.markdown(f"""
-            <div style="border:1px solid #fecdd3;border-left:4px solid #be185d;
+            <div style="border:1px solid #e2e8f0;border-left:4px solid {cor_borda};
                         border-radius:10px;padding:14px 18px;margin-bottom:8px">
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-                <span style="background:#fff1f2;border-radius:20px;padding:2px 10px;
-                             font-size:0.7rem;font-weight:700;color:#be185d">{disparo}</span>
+                <span style="background:#f1f5f9;border-radius:20px;padding:2px 10px;
+                             font-size:0.7rem;font-weight:700;color:#475569">{disparo}</span>
                 <span style="font-weight:600;color:#1e293b">{titulo}</span>
                 <span style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:20px;
                              padding:2px 10px;font-size:0.78rem;font-weight:700;color:#7c3aed">
@@ -329,12 +377,8 @@ with _aba_dia:
                 </span>
                 {receita_html}
               </div>
-              <div style="font-size:0.8rem;color:#475569;margin-bottom:4px">
-                <b>Oferta:</b> {oferta}
-              </div>
-              <div style="font-size:0.8rem;color:#64748b">
-                <b>Tom:</b> {tom}
-              </div>
+              <div style="font-size:0.8rem;color:#475569;margin-bottom:4px"><b>Oferta:</b> {oferta}</div>
+              <div style="font-size:0.8rem;color:#64748b"><b>Tom:</b> {tom}</div>
             </div>""", unsafe_allow_html=True)
         with _cr:
             br()
@@ -342,54 +386,53 @@ with _aba_dia:
                                file_name=arquivo, mime="text/csv",
                                key=f"dm_{key}", disabled=(n == 0))
 
-    st.markdown("**Disparo 1 — Quinta, 30/04**")
+    # ── Disparo 1 ─────────────────────────────────────────────────────────────
+    st.markdown("**Disparo 1 — Quinta, 01/05**")
 
-    _camp_card("vip_fieis", "Disparo 1", "VIP + Fiéis",
-        int(_dqr["vip_fieis_n"] or 0), float(_dqr["vip_fieis_rs"] or 0),
+    _camp_card("dm_vip", "01/05 · 💐 Dia das Mães", "#be185d", "VIP + Fiéis — perfil feminino",
+        int(_dqr["dm_vip_n"] or 0), float(_dqr["dm_vip_rs"] or 0),
         "Sem desconto — acesso antecipado exclusivo",
         "\"Você é especial aqui. Antes de todo mundo.\" Pertencimento, não promoção.",
-        "status_code = 'S1' OR valor_code = 'V1'",
-        f"{_hoje_brt}_dm_vip_fieis.csv")
+        "(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino')",
+        f"{_hoje_brt}_dm1_vip_feminino.csv")
 
-    _camp_card("esf_vip", "Disparo 1", "Esfriando VIP",
-        int(_dqr["esf_vip_n"] or 0), float(_dqr["esf_vip_rs"] or 0),
+    _camp_card("dm_esf", "01/05 · 💐 Dia das Mães", "#be185d", "Esfriando VIP — perfil feminino",
+        int(_dqr["dm_esf_n"] or 0), float(_dqr["dm_esf_rs"] or 0),
         "Desconto 10–15% + frete grátis",
-        "\"A gente sente sua falta ♥\" — urgência genuína do feriado, tom caloroso e direto.",
-        "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
-        f"{_hoje_brt}_dm_esfriando_vip.csv")
+        "\"A gente sente sua falta ♥\" — urgência real do feriado, tom caloroso.",
+        "status_code = 'S4' AND valor_code IN ('V1','V2','V3') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino')",
+        f"{_hoje_brt}_dm1_esf_feminino.csv")
+
+    _camp_card("copa_vip", "01/05 · ⚽ Copa", "#1d4ed8", "VIP + Fiéis — perfil camisetas",
+        int(_dqr["copa_vip_n"] or 0), float(_dqr["copa_vip_rs"] or 0),
+        "Early access — novo lançamento Copa 2026",
+        "\"Você foi das primeiras a comprar seleção aqui. O próximo lançamento é seu antes.\"",
+        "(status_code = 'S1' OR valor_code = 'V1') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'copa')",
+        f"{_hoje_brt}_copa1_vip.csv")
 
     br()
     st.markdown("**Disparo 2 — Sábado, 09/05**")
 
-    _camp_card("novo_promissor", "Disparo 2", "Novo Crush + Crush Promissor",
-        int(_dqr["novo_n"] or 0) + int(_dqr["promissor_n"] or 0),
-        float(_dqr["novo_rs"] or 0) + float(_dqr["promissor_rs"] or 0),
-        "Sem desconto — curadoria editorial",
-        "\"Você já nos escolheu uma vez. Deixa a gente te ajudar a escolher o presente perfeito.\" Foco em 2ª compra.",
-        "status_code = 'S2' OR (personalidade_code = 'P3' AND recencia_code IN ('R1','R2'))",
-        f"{_hoje_brt}_dm_novo_promissor.csv")
+    _camp_card("dm_base", "09/05 · 💐 Dia das Mães", "#be185d", "Base feminina — reativação + 1ª compra",
+        int(_dqr["dm_base_n"] or 0), float(_dqr["dm_base_rs"] or 0),
+        "Desconto 10% ou frete grátis + oferta de boas-vindas para S0",
+        "\"Que presente lindo você pode encontrar aqui.\" — feriado como gatilho universal.",
+        "status_code IN ('S2','S3','S7','S6','S0') AND (status_code = 'S0' OR customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'feminino'))",
+        f"{_hoje_brt}_dm2_base_feminino.csv")
 
-    _camp_card("reativar", "Disparo 2", "Morno + Em Pausa + Ghosting",
-        int(_dqr["reativar_n"] or 0), float(_dqr["reativar_rs"] or 0),
-        "Desconto 10% ou frete grátis",
-        "\"Você lembrou de mim, eu lembro de você.\" O feriado é a desculpa perfeita para voltar.",
-        "status_code IN ('S3','S7','S6')",
-        f"{_hoje_brt}_dm_reativar.csv")
-
-    _camp_card("so_olhando", "Disparo 2", "Só Olhando — primeira compra",
-        int(_dqr["so_n"] or 0), 0,
-        "Oferta de entrada — desconto de boas-vindas ou frete grátis na 1ª compra",
-        "\"Que tal presentear com algo especial? Primeira compra com condição exclusiva.\" Convite de entrada.",
-        "status_code = 'S0'",
-        f"{_hoje_brt}_dm_so_olhando.csv")
+    _camp_card("copa_base", "09/05 · ⚽ Copa", "#1d4ed8", "Base camisetas — lançamento Copa",
+        int(_dqr["copa_base_n"] or 0), float(_dqr["copa_base_rs"] or 0),
+        "Apresentar coleção Copa 2026 — sem desconto",
+        "\"A Copa chegou. E a gente chegou junto.\" — lançamento como evento, não promoção.",
+        "status_code NOT IN ('S0') AND customer_id IN (SELECT customer_id FROM ({_PERFIL_COMPRA}) p WHERE perfil_compra = 'copa') AND NOT (status_code = 'S1' OR valor_code = 'V1')",
+        f"{_hoje_brt}_copa2_base.csv")
 
     br()
     st.markdown(f"""
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                 padding:14px 18px;font-size:0.82rem;color:#64748b;line-height:1.6">
-    ✅ <b>Base completa coberta: {_base_total:,} pessoas em 5 listas.</b><br>
-    O único filtro recomendado é técnico — aplique no seu ESP: remova hard bounces e
-    quem clicou em unsubscribe. Nenhuma exclusão estratégica necessária.
+    ✅ <b>Base completa: {_base_total:,} pessoas · 5 listas · 2 artes</b><br>
+    Filtro técnico no ESP: remova hard bounces e unsubscribes. Nenhuma exclusão estratégica.
     </div>
     """, unsafe_allow_html=True)
 
