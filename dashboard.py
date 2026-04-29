@@ -244,9 +244,9 @@ with _aba_dia:
     """)
     _bc = query("""
         SELECT
-            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 1 THEN 1 END) AS novos_ontem,
-            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 2 THEN 1 END) AS novos_anteontem,
-            ROUND(AVG(cnt)::numeric,1) AS media_30d
+            COALESCE(SUM(CASE WHEN d = CURRENT_DATE - 1 THEN cnt ELSE 0 END), 0) AS novos_ontem,
+            COALESCE(SUM(CASE WHEN d = CURRENT_DATE - 2 THEN cnt ELSE 0 END), 0) AS novos_anteontem,
+            ROUND(COALESCE(AVG(cnt), 0)::numeric, 1) AS media_30d
         FROM (
             SELECT registration_date::date d, COUNT(*) cnt
             FROM customers
