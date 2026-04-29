@@ -229,248 +229,161 @@ _aba_analitica, _aba_dia, _aba_higienicos = st.tabs(["📊 Analítica", "☀️ 
 
 with _aba_dia:
 
-    # ── Dados para o briefing ────────────────────────────────────────────────
     _hoje_brt = now_brt().date()
-    _ontem    = _hoje_brt - timedelta(days=1)
 
-    _brief = query("""
+    # ── Dados para campanha ──────────────────────────────────────────────────
+    _dq = query("""
         SELECT
-            ROUND(SUM(CASE WHEN date_created::date = CURRENT_DATE - 1 THEN total ELSE 0 END)::numeric,0) AS vendas_ontem,
-            COUNT(CASE WHEN date_created::date = CURRENT_DATE - 1 THEN 1 END) AS pedidos_ontem,
-            ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) AS vendas_7d,
-            ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 14
-                           AND date_created::date < CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) AS vendas_7d_ant
-        FROM orders
-        WHERE status NOT IN ('cancelled','refunded','failed')
-    """)
-    _bc = query("""
-        SELECT
-            COALESCE(SUM(CASE WHEN d = CURRENT_DATE - 1 THEN cnt ELSE 0 END), 0) AS novos_ontem,
-            COALESCE(SUM(CASE WHEN d = CURRENT_DATE - 2 THEN cnt ELSE 0 END), 0) AS novos_anteontem,
-            ROUND(COALESCE(AVG(cnt), 0)::numeric, 1) AS media_30d
-        FROM (
-            SELECT registration_date::date d, COUNT(*) cnt
-            FROM customers
-            WHERE registration_date IS NOT NULL AND registration_date != ''
-              AND registration_date::date >= CURRENT_DATE - 31
-            GROUP BY d
-        ) sub
-    """)
-    _ba = query("""
-        SELECT
-            COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2') THEN 1 END) AS esfriando_vip,
-            COUNT(CASE WHEN status_code = 'S4' THEN 1 END) AS esfriando_total,
-            COUNT(CASE WHEN status_code = 'S2' AND frequencia_code = 'F1'
-                       AND NULLIF(last_order_date,'')::date >= CURRENT_DATE - 30 THEN 1 END) AS aguardando_2a,
-            COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS em_pausa,
-            ROUND(100.0 * COUNT(CASE WHEN status_code = 'S6' THEN 1 END) / NULLIF(COUNT(*),0), 1) AS ghosting_pct
+            COUNT(CASE WHEN status_code = 'S1' THEN 1 END) AS fieis_n,
+            ROUND(SUM(CASE WHEN status_code = 'S1' THEN total_spent ELSE 0 END)::numeric,0) AS fieis_rs,
+
+            COUNT(CASE WHEN valor_code = 'V1' THEN 1 END) AS vip_n,
+            ROUND(SUM(CASE WHEN valor_code = 'V1' THEN total_spent ELSE 0 END)::numeric,0) AS vip_rs,
+
+            COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN 1 END) AS esf_vip_n,
+            ROUND(SUM(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN total_spent ELSE 0 END)::numeric,0) AS esf_vip_rs,
+
+            COUNT(CASE WHEN status_code = 'S3' THEN 1 END) AS morno_n,
+            ROUND(SUM(CASE WHEN status_code = 'S3' THEN total_spent ELSE 0 END)::numeric,0) AS morno_rs,
+
+            COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS pausa_n,
+            ROUND(SUM(CASE WHEN status_code = 'S7' THEN total_spent ELSE 0 END)::numeric,0) AS pausa_rs,
+
+            COUNT(CASE WHEN status_code = 'S2' THEN 1 END) AS novo_n,
+            ROUND(SUM(CASE WHEN status_code = 'S2' THEN total_spent ELSE 0 END)::numeric,0) AS novo_rs
         FROM crm_profiles
     """)
-    _b   = _brief.iloc[0]
-    _bcc = _bc.iloc[0]
-    _baa = _ba.iloc[0]
+    _dqr = _dq.iloc[0]
 
-    _vendas_ontem  = float(_b["vendas_ontem"] or 0)
-    _pedidos_ontem = int(_b["pedidos_ontem"] or 0)
-    _vendas_7d     = float(_b["vendas_7d"] or 0)
-    _vendas_7d_ant = float(_b["vendas_7d_ant"] or 0)
-    _novos_ontem   = int(_bcc["novos_ontem"] or 0)
-    _novos_anteontem = int(_bcc["novos_anteontem"] or 0)
-    _media_30d     = float(_bcc["media_30d"] or 0)
-    _esfriando_vip = int(_baa["esfriando_vip"] or 0)
-    _esfriando_total = int(_baa["esfriando_total"] or 0)
-    _aguardando_2a = int(_baa["aguardando_2a"] or 0)
-    _em_pausa      = int(_baa["em_pausa"] or 0)
-    _ghosting_pct  = float(_baa["ghosting_pct"] or 0)
-    _delta_7d      = _vendas_7d - _vendas_7d_ant
-
-    # ── Saudação ─────────────────────────────────────────────────────────────
-    _hora = now_brt().hour
-    _saudacao = "Bom dia" if _hora < 12 else "Boa tarde" if _hora < 18 else "Boa noite"
-    _data_fmt = now_brt().strftime("%A, %d de %B").capitalize()
-
-    st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#7c3aed,#db2777);border-radius:16px;
-                padding:28px 32px;margin-bottom:24px;color:white">
-      <div style="font-size:0.85rem;opacity:0.85;margin-bottom:4px">{_data_fmt}</div>
-      <div style="font-size:1.7rem;font-weight:700;margin-bottom:8px">{_saudacao} 👋</div>
-      <div style="font-size:0.95rem;opacity:0.9;line-height:1.6">
-        Aqui está o que importa hoje na sua base de {int(total):,} clientes.
+    # ── Banner ───────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#be185d,#9d174d);border-radius:16px;
+                padding:28px 32px;margin-bottom:28px;color:white">
+      <div style="font-size:0.8rem;opacity:0.8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">
+        Campanha ativa
+      </div>
+      <div style="font-size:1.8rem;font-weight:800;margin-bottom:8px">💐 Dia das Mães — 11 de Maio</div>
+      <div style="font-size:0.95rem;opacity:0.9;line-height:1.65">
+        Janela curta. Dois disparos estratégicos esta semana capturam o pico de intenção de compra
+        antes que a concorrência sature o inbox. Abaixo estão as listas e o timing recomendado.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Bloco 1: O que aconteceu ontem ───────────────────────────────────────
-    st.markdown("#### 📅 Ontem")
-    _d1, _d2, _d3 = st.columns(3)
+    # ── Calendário ───────────────────────────────────────────────────────────
+    st.markdown("#### 📅 Quando disparar")
+    _cal1, _cal2 = st.columns(2)
 
-    def _semaforo(val, ref, inverso=False):
-        if ref == 0: return "🟡"
-        pct = (val - ref) / ref * 100
-        if inverso: pct = -pct
-        if pct >= 10: return "🟢"
-        if pct >= -10: return "🟡"
-        return "🔴"
-
-    _sem_vendas  = _semaforo(_vendas_ontem, _vendas_7d / 7)
-    _sem_novos   = _semaforo(_novos_ontem, _novos_anteontem)
-    _sem_semana  = _semaforo(_vendas_7d, _vendas_7d_ant)
-
-    _d1.markdown(f"""
-    <div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px">
-      <div style="font-size:1.3rem">{_sem_vendas} Vendas ontem</div>
-      <div style="font-size:1.8rem;font-weight:700;margin:6px 0">R$ {_vendas_ontem:,.0f}</div>
-      <div style="font-size:0.8rem;color:#64748b">{_pedidos_ontem} pedidos · média 7d: R$ {_vendas_7d/7:,.0f}/dia</div>
+    _cal1.markdown("""
+    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2">
+      <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
+                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 1 — Quinta-feira, 30/04</div>
+      <div style="font-weight:700;color:#1e293b;margin-bottom:8px">Acesso antecipado + Reativação VIP</div>
+      <div style="font-size:0.82rem;color:#64748b;line-height:1.6">
+        <b>VIP + Fiéis:</b> "Antes de todo mundo — acesso exclusivo"<br>
+        Sem desconto. Tom de exclusividade e pertencimento.<br><br>
+        <b>Esfriando VIP:</b> "A gente sente sua falta ♥"<br>
+        Desconto real (10–15%) + frete grátis. Urgência de feriado.
+      </div>
     </div>""", unsafe_allow_html=True)
 
-    _d2.markdown(f"""
-    <div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px">
-      <div style="font-size:1.3rem">{_sem_novos} Novos cadastros</div>
-      <div style="font-size:1.8rem;font-weight:700;margin:6px 0">{_novos_ontem}</div>
-      <div style="font-size:0.8rem;color:#64748b">anteontem: {_novos_anteontem} · média 30d: {_media_30d:.0f}/dia</div>
-    </div>""", unsafe_allow_html=True)
-
-    _d3.markdown(f"""
-    <div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px">
-      <div style="font-size:1.3rem">{_sem_semana} Semana (7d)</div>
-      <div style="font-size:1.8rem;font-weight:700;margin:6px 0">R$ {_vendas_7d:,.0f}</div>
-      <div style="font-size:0.8rem;color:#64748b">{"+" if _delta_7d >= 0 else ""}R$ {_delta_7d:,.0f} vs semana anterior</div>
+    _cal2.markdown("""
+    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2">
+      <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
+                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 2 — Sábado, 09/05</div>
+      <div style="font-weight:700;color:#1e293b;margin-bottom:8px">Último dia — base ampla</div>
+      <div style="font-size:0.82rem;color:#64748b;line-height:1.6">
+        <b>Morno + Em Pausa:</b> "Você lembrou de mim, eu lembro de você"<br>
+        Desconto simbólico (10%) ou frete grátis. Feriado como gatilho externo.<br><br>
+        <b>Novo Crush:</b> Curadoria editorial — "Deixa a gente te ajudar a escolher"<br>
+        Sem desconto. Foco em 2ª compra.
+      </div>
     </div>""", unsafe_allow_html=True)
 
     br()
 
-    # ── Bloco 2: Alertas ativos ───────────────────────────────────────────────
-    st.markdown("#### 🚨 Alertas ativos")
+    # ── Listas ───────────────────────────────────────────────────────────────
+    st.markdown("#### 📋 Listas para exportar")
 
-    _alertas = []
-
-    if _esfriando_vip >= 50:
-        _alertas.append(("🔴", "Alta prioridade",
-            f"{_esfriando_vip} clientes de alto valor estão esfriando",
-            f"Essas clientes já gastaram bem e estão sumindo. Ative agora antes que seja tarde.",
-            "esfriando_valor"))
-
-    if _aguardando_2a >= 100:
-        _alertas.append(("🟡", "Oportunidade",
-            f"{_aguardando_2a} novos crushes ainda não fizeram a 2ª compra",
-            f"Compraram nos últimos 30 dias e não voltaram. Janela de conversão aberta.",
-            "segundo_pedido"))
-
-    if _em_pausa >= 200:
-        _alertas.append(("🟡", "Atenção",
-            f"{_em_pausa} clientes em pausa — 2+ compras mas sumiram",
-            f"Clientes que já provaram gostar da marca. Reativar custa menos que adquirir.",
-            "em_pausa"))
-
-    if _ghosting_pct > 50:
-        _alertas.append(("🔴", "Atenção",
-            f"{_ghosting_pct:.0f}% da base fez só 1 compra e nunca mais voltou",
-            f"Ghosting alto indica problema na conversão para 2ª compra.",
-            None))
-
-    if _vendas_ontem == 0 and _pedidos_ontem == 0:
-        _alertas.append(("🔴", "Verificar",
-            "Nenhuma venda registrada ontem",
-            "Verifique se a loja está funcionando corretamente.",
-            None))
-
-    if not _alertas:
-        st.success("Nenhum alerta crítico no momento. Base saudável! ✅")
-    else:
-        for _ico, _nivel, _titulo, _desc, _seg in _alertas:
-            _bg = "#fef2f2" if _ico == "🔴" else "#fefce8"
-            _brd = "#fca5a5" if _ico == "🔴" else "#fde047"
-            _col_left, _col_right = st.columns([5, 1])
-            with _col_left:
-                st.markdown(f"""
-                <div style="background:{_bg};border:1px solid {_brd};border-left:4px solid {'#ef4444' if _ico=='🔴' else '#eab308'};
-                            border-radius:10px;padding:14px 18px;margin-bottom:8px">
-                  <div style="font-size:0.7rem;font-weight:700;color:{'#991b1b' if _ico=='🔴' else '#854d0e'};
-                               text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">{_ico} {_nivel}</div>
-                  <div style="font-weight:600;color:#1e293b;margin-bottom:4px">{_titulo}</div>
-                  <div style="font-size:0.82rem;color:#64748b">{_desc}</div>
-                </div>""", unsafe_allow_html=True)
-            if _seg:
-                with _col_right:
-                    br()
-                    st.download_button(
-                        "⬇️ CSV",
-                        csv_bytes(dict(
-                            esfriando_valor="status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
-                            segundo_pedido="frequencia_code = 'F1' AND recencia_code = 'R1'",
-                            em_pausa="status_code = 'S7'",
-                        ).get(_seg, "status_code = 'S1'")),
-                        file_name=f"{_hoje_brt}_{_seg}.csv",
-                        mime="text/csv",
-                        key=f"dl_{_seg}",
-                    )
-
-    br()
-
-    # ── Bloco 3: 3 Ações para hoje ───────────────────────────────────────────
-    st.markdown("#### 🎯 3 ações para hoje")
-
-    _acoes = []
-
-    # Prioriza esfriando VIP
-    if _esfriando_vip >= 20:
-        _acoes.append({
-            "n": "1", "titulo": "Reativar alto valor esfriando",
-            "desc": f"Você tem {_esfriando_vip} clientes de alto valor sumindo. "
-                    f"Suba essa lista no Meta Ads como audiência personalizada e crie um anúncio de reativação.",
-            "cta": "Baixar lista", "seg": "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
-            "arquivo": f"{_hoje_brt}_esfriando_vip.csv"
-        })
-
-    # Segunda compra
-    if _aguardando_2a >= 50:
-        _acoes.append({
-            "n": "2" if _acoes else "1", "titulo": "Empurrar 2ª compra",
-            "desc": f"{_aguardando_2a} clientes compraram pela 1ª vez nos últimos 30 dias e não voltaram. "
-                    f"Um email ou WhatsApp com oferta leve pode converter boa parte.",
-            "cta": "Baixar lista", "seg": "frequencia_code = 'F1' AND recencia_code = 'R1'",
-            "arquivo": f"{_hoje_brt}_segundo_pedido.csv"
-        })
-
-    # Em pausa
-    if _em_pausa >= 100 and len(_acoes) < 3:
-        _acoes.append({
-            "n": str(len(_acoes)+1), "titulo": "Reativar em pausa",
-            "desc": f"{_em_pausa} clientes com 2+ compras pararam. "
-                    f"Elas já gostam da marca — uma comunicação de reativação com novidade converte bem.",
-            "cta": "Baixar lista", "seg": "status_code = 'S7'",
-            "arquivo": f"{_hoje_brt}_em_pausa.csv"
-        })
-
-    # Fallback se não há alertas críticos
-    if not _acoes:
-        _acoes.append({
-            "n": "1", "titulo": "Nutrir as fiéis",
-            "desc": f"Base saudável hoje. Foque em engajar as {int(fieis)} fiéis com novidades ou lançamento próximo.",
-            "cta": "Baixar lista", "seg": "status_code = 'S1'",
-            "arquivo": f"{_hoje_brt}_fieis.csv"
-        })
-
-    for _a in _acoes[:3]:
-        _ac_left, _ac_right = st.columns([5, 1])
-        with _ac_left:
+    def _camp_card(key, disparo, titulo, n, receita, oferta, tom, filtro, arquivo):
+        receita_html = (
+            f'<span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;'
+            f'padding:2px 10px;font-size:0.75rem;font-weight:600;color:#16a34a">'
+            f'R$ {int(receita):,} histórico</span>' if receita and receita > 0 else ""
+        )
+        _cl, _cr = st.columns([5, 1])
+        with _cl:
             st.markdown(f"""
-            <div style="border:1px solid #e2e8f0;border-left:4px solid #7c3aed;
-                        border-radius:10px;padding:16px 20px;margin-bottom:8px">
-              <div style="font-size:0.7rem;font-weight:700;color:#7c3aed;
-                           text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">AÇÃO {_a['n']}</div>
-              <div style="font-weight:600;color:#1e293b;margin-bottom:6px">{_a['titulo']}</div>
-              <div style="font-size:0.84rem;color:#64748b;line-height:1.55">{_a['desc']}</div>
+            <div style="border:1px solid #fecdd3;border-left:4px solid #be185d;
+                        border-radius:10px;padding:14px 18px;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+                <span style="background:#fff1f2;border-radius:20px;padding:2px 10px;
+                             font-size:0.7rem;font-weight:700;color:#be185d">{disparo}</span>
+                <span style="font-weight:600;color:#1e293b">{titulo}</span>
+                <span style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:20px;
+                             padding:2px 10px;font-size:0.78rem;font-weight:700;color:#7c3aed">
+                  {n:,} clientes
+                </span>
+                {receita_html}
+              </div>
+              <div style="font-size:0.8rem;color:#475569;margin-bottom:4px">
+                <b>Oferta:</b> {oferta}
+              </div>
+              <div style="font-size:0.8rem;color:#64748b">
+                <b>Tom:</b> {tom}
+              </div>
             </div>""", unsafe_allow_html=True)
-        with _ac_right:
+        with _cr:
             br()
-            st.download_button(
-                f"⬇️ {_a['cta']}",
-                csv_bytes(_a["seg"]),
-                file_name=_a["arquivo"],
-                mime="text/csv",
-                key=f"acao_{_a['n']}",
-            )
+            st.download_button("⬇️ CSV", csv_bytes(filtro),
+                               file_name=arquivo, mime="text/csv",
+                               key=f"dm_{key}", disabled=(n == 0))
+
+    _vip_fieis_n  = int(_dqr["vip_n"] or 0) + int(_dqr["fieis_n"] or 0)
+    _vip_fieis_rs = float(_dqr["vip_rs"] or 0) + float(_dqr["fieis_rs"] or 0)
+
+    st.markdown("**Disparo 1 — Quinta, 30/04**")
+
+    _camp_card("vip_fieis", "Disparo 1", "VIP + Fiéis",
+        _vip_fieis_n, _vip_fieis_rs,
+        "Sem desconto — acesso antecipado exclusivo",
+        "Exclusividade e pertencimento. Elas merecem ser as primeiras.",
+        "status_code = 'S1' OR valor_code = 'V1'",
+        f"{_hoje_brt}_dm_vip_fieis.csv")
+
+    _camp_card("esf_vip", "Disparo 1", "Esfriando VIP",
+        int(_dqr["esf_vip_n"] or 0), float(_dqr["esf_vip_rs"] or 0),
+        "Desconto 10–15% + frete grátis",
+        "\"A gente sente sua falta\" — urgência real do feriado, tom caloroso.",
+        "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
+        f"{_hoje_brt}_dm_esfriando_vip.csv")
+
+    br()
+    st.markdown("**Disparo 2 — Sábado, 09/05**")
+
+    _camp_card("morno_pausa", "Disparo 2", "Morno + Em Pausa",
+        int(_dqr["morno_n"] or 0) + int(_dqr["pausa_n"] or 0),
+        float(_dqr["morno_rs"] or 0) + float(_dqr["pausa_rs"] or 0),
+        "Desconto 10% ou frete grátis",
+        "\"Você lembrou de mim, eu lembro de você\" — feriado como desculpa legítima para voltar.",
+        "status_code IN ('S3','S7')",
+        f"{_hoje_brt}_dm_morno_pausa.csv")
+
+    _camp_card("novo_crush", "Disparo 2", "Novo Crush",
+        int(_dqr["novo_n"] or 0), float(_dqr["novo_rs"] or 0),
+        "Sem desconto — curadoria editorial",
+        "\"Deixa a gente te ajudar a escolher\" — objetivo é 2ª compra, não margem.",
+        "status_code = 'S2'",
+        f"{_hoje_brt}_dm_novo_crush.csv")
+
+    br()
+    st.markdown("""
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                padding:14px 18px;font-size:0.82rem;color:#64748b;line-height:1.6">
+    🚫 <b>Não disparar para:</b> Ghosting antigo, Gelando baixo valor, Supressão —
+    preserva deliverability e economiza verba para quem tem chance real de converter.
+    </div>
+    """, unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════════════
 # ABA HIGIÊNICOS
