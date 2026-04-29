@@ -563,9 +563,11 @@ if _ga4_df is not None and not _ga4_df.empty:
             _ck1.metric("Sessões", f"{int(_df_camp['sessoes'].sum()):,.0f}")
             _ck2.metric("Receita atribuída", f"R$ {_df_camp['receita'].sum():,.0f}")
             _ck3.metric("Pedidos", f"{int(_df_camp['pedidos'].sum()):,.0f}")
-            _custo_tot = _df_camp['custo'].sum()
-            _rec_tot   = _df_camp['receita'].sum()
-            _ck4.metric("ROAS Google", f"{_rec_tot/_custo_tot:.1f}x" if _custo_tot > 0 else "—")
+            _df_com_custo = _df_camp[_df_camp['custo'] > 0]
+            _custo_tot    = _df_com_custo['custo'].sum()
+            _rec_paga     = _df_com_custo['receita'].sum()
+            _ck4.metric("ROAS Google Ads", f"{_rec_paga/_custo_tot:.1f}x" if _custo_tot > 0 else "—",
+                        help=f"Só campanhas com custo registrado · R$ {_rec_paga:,.0f} receita ÷ R$ {_custo_tot:,.0f} custo")
 
             br()
 
