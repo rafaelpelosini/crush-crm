@@ -429,7 +429,36 @@ def save_insights_snapshot(conn, synced_at: str):
     cur.execute("SELECT COUNT(*) v FROM crm_profiles WHERE orders_count>0")
     r = cur.fetchone(); _save("total_compradoras", r["v"])
 
-    print(f"  Snapshot de {len([k for k in ['ghosting_rate','janela_ouro','concentracao_top10','pct_receita_2anos','adormecido_n','adormecido_rs','pct_compra_1mes','reativadas','media_pedidos_vip','media_pedidos_geral','top_conv_pct','top_ghost_pct','ticket_vip_1a','ticket_ghost_1a','score_medio','ticket_medio_geral','total_compradoras']])} métricas salvo em insights_history")
+    # s0_total — base de nunca compraram (denominador para taxa de conversão S0→S2)
+    cur.execute("SELECT COUNT(*) v FROM crm_profiles WHERE status_code='S0'")
+    r = cur.fetchone(); _save("s0_total", r["v"])
+
+    # s0_converteram — quem era S0 no snapshot anterior e agora é S2
+    cur.execute("""
+        WITH ultimo_snap AS (
+            SELECT customer_id
+            FROM profile_history
+            WHERE status_code = 'S0'
+              AND synced_at = (
+                SELECT MAX(synced_at) FROM profile_history
+                WHERE synced_at < (SELECT MAX(synced_at) FROM profile_history)
+              )
+        )
+        SELECT COUNT(*) v
+        FROM crm_profiles cp
+        JOIN ultimo_snap s ON s.customer_id = cp.customer_id
+        WHERE cp.status_code = 'S2'
+    """)
+    r = cur.fetchone(); _save("s0_converteram", r["v"])
+
+    METRICAS = [
+        'ghosting_rate','janela_ouro','concentracao_top10','pct_receita_2anos',
+        'adormecido_n','adormecido_rs','pct_compra_1mes','reativadas',
+        'media_pedidos_vip','media_pedidos_geral','top_conv_pct','top_ghost_pct',
+        'ticket_vip_1a','ticket_ghost_1a','score_medio','ticket_medio_geral',
+        'total_compradoras','s0_total','s0_converteram'
+    ]
+    print(f"  Snapshot de {len(METRICAS)} métricas salvo em insights_history")
 
 
 def get_last_sync() -> str | None:
