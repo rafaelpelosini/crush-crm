@@ -289,6 +289,14 @@ with _aba_dia:
             ROUND(SUM(CASE WHEN (p.perfil_compra = 'feminino' OR cp.status_code = 'S0')
                             AND cp.status_code IN ('S2','S3','S7','S6','S0') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_base_rs,
 
+            -- Base feminina split: S0 vs quem já comprou
+            COUNT(CASE WHEN cp.status_code = 'S0' THEN 1 END) AS dm_so_n,
+
+            COUNT(CASE WHEN p.perfil_compra = 'feminino'
+                            AND cp.status_code IN ('S2','S3','S7','S6') THEN 1 END) AS dm_reativar_n,
+            ROUND(SUM(CASE WHEN p.perfil_compra = 'feminino'
+                            AND cp.status_code IN ('S2','S3','S7','S6') THEN cp.total_spent ELSE 0 END)::numeric,0) AS dm_reativar_rs,
+
             -- Sub-segmentos Copa
             COUNT(CASE WHEN p.perfil_compra = 'copa' AND cp.status_code != 'S0'
                             AND (cp.status_code = 'S1' OR cp.valor_code = 'V1') THEN 1 END) AS copa_vip_n,
@@ -424,12 +432,19 @@ with _aba_dia:
     br()
     st.markdown("**Disparo 2 — Sábado, 09/05**")
 
-    _camp_card("dm_base", "09/05 · 💐 Dia das Mães", "#be185d", "Base feminina — reativação + 1ª compra",
-        int(_dqr["dm_base_n"] or 0), float(_dqr["dm_base_rs"] or 0),
-        "Desconto 10% ou frete grátis + oferta de boas-vindas para S0",
-        "\"Que presente lindo você pode encontrar aqui.\" — feriado como gatilho universal.",
-        f"status_code IN ('S2','S3','S7','S6','S0') AND (status_code = 'S0' OR customer_id IN {_SUBQ_FEM})",
-        f"{_hoje_brt}_dm2_base_feminino.csv")
+    _camp_card("dm_reativar", "09/05 · 💐 Dia das Mães", "#be185d", "Base feminina — quem já comprou",
+        int(_dqr["dm_reativar_n"] or 0), float(_dqr["dm_reativar_rs"] or 0),
+        "Desconto 10% ou frete grátis",
+        "\"Você lembrou de mim, eu lembro de você ♥\" — feriado como motivo pra voltar.",
+        f"status_code IN ('S2','S3','S7','S6') AND customer_id IN {_SUBQ_FEM}",
+        f"{_hoje_brt}_dm2_reativar_feminino.csv")
+
+    _camp_card("dm_so", "09/05 · 💐 Dia das Mães", "#be185d", "Nunca comprou — 1ª compra",
+        int(_dqr["dm_so_n"] or 0), 0,
+        "Oferta de boas-vindas — desconto ou frete grátis na 1ª compra",
+        "\"Um presente especial — pra você ou pra sua mãe.\" Apresentação da marca, sem pressão.",
+        "status_code = 'S0'",
+        f"{_hoje_brt}_dm2_so_olhando.csv")
 
     _camp_card("copa_base", "09/05 · ⚽ Copa", "#1d4ed8", "Base camisetas — lançamento Copa",
         int(_dqr["copa_base_n"] or 0), float(_dqr["copa_base_rs"] or 0),
