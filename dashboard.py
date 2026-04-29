@@ -234,29 +234,31 @@ with _aba_dia:
     # ── Dados para campanha ──────────────────────────────────────────────────
     _dq = query("""
         SELECT
-            COUNT(CASE WHEN status_code = 'S1' THEN 1 END) AS fieis_n,
-            ROUND(SUM(CASE WHEN status_code = 'S1' THEN total_spent ELSE 0 END)::numeric,0) AS fieis_rs,
+            COUNT(*) AS base_total,
 
-            COUNT(CASE WHEN valor_code = 'V1' THEN 1 END) AS vip_n,
-            ROUND(SUM(CASE WHEN valor_code = 'V1' THEN total_spent ELSE 0 END)::numeric,0) AS vip_rs,
+            COUNT(CASE WHEN status_code = 'S1' OR valor_code = 'V1' THEN 1 END) AS vip_fieis_n,
+            ROUND(SUM(CASE WHEN status_code = 'S1' OR valor_code = 'V1' THEN total_spent ELSE 0 END)::numeric,0) AS vip_fieis_rs,
 
             COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN 1 END) AS esf_vip_n,
             ROUND(SUM(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN total_spent ELSE 0 END)::numeric,0) AS esf_vip_rs,
 
-            COUNT(CASE WHEN status_code = 'S3' THEN 1 END) AS morno_n,
-            ROUND(SUM(CASE WHEN status_code = 'S3' THEN total_spent ELSE 0 END)::numeric,0) AS morno_rs,
-
-            COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS pausa_n,
-            ROUND(SUM(CASE WHEN status_code = 'S7' THEN total_spent ELSE 0 END)::numeric,0) AS pausa_rs,
-
             COUNT(CASE WHEN status_code = 'S2' THEN 1 END) AS novo_n,
-            ROUND(SUM(CASE WHEN status_code = 'S2' THEN total_spent ELSE 0 END)::numeric,0) AS novo_rs
+            ROUND(SUM(CASE WHEN status_code = 'S2' THEN total_spent ELSE 0 END)::numeric,0) AS novo_rs,
+
+            COUNT(CASE WHEN personalidade_code = 'P3' AND recencia_code IN ('R1','R2') THEN 1 END) AS promissor_n,
+            ROUND(SUM(CASE WHEN personalidade_code = 'P3' AND recencia_code IN ('R1','R2') THEN total_spent ELSE 0 END)::numeric,0) AS promissor_rs,
+
+            COUNT(CASE WHEN status_code IN ('S3','S7','S6') THEN 1 END) AS reativar_n,
+            ROUND(SUM(CASE WHEN status_code IN ('S3','S7','S6') THEN total_spent ELSE 0 END)::numeric,0) AS reativar_rs,
+
+            COUNT(CASE WHEN status_code = 'S0' THEN 1 END) AS so_n
         FROM crm_profiles
     """)
     _dqr = _dq.iloc[0]
+    _base_total = int(_dqr["base_total"] or 0)
 
     # ── Banner ───────────────────────────────────────────────────────────────
-    st.markdown("""
+    st.markdown(f"""
     <div style="background:linear-gradient(135deg,#be185d,#9d174d);border-radius:16px;
                 padding:28px 32px;margin-bottom:28px;color:white">
       <div style="font-size:0.8rem;opacity:0.8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">
@@ -264,39 +266,40 @@ with _aba_dia:
       </div>
       <div style="font-size:1.8rem;font-weight:800;margin-bottom:8px">💐 Dia das Mães — 11 de Maio</div>
       <div style="font-size:0.95rem;opacity:0.9;line-height:1.65">
-        Janela curta. Dois disparos estratégicos esta semana capturam o pico de intenção de compra
-        antes que a concorrência sature o inbox. Abaixo estão as listas e o timing recomendado.
+        Base completa: <b>{_base_total:,} pessoas</b> · 2 disparos · mensagem adaptada por segmento.<br>
+        Custo de email baixo = manda para todo mundo. A segmentação serve para personalizar, não excluir.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     # ── Calendário ───────────────────────────────────────────────────────────
-    st.markdown("#### 📅 Quando disparar")
+    st.markdown("#### 📅 Calendário")
     _cal1, _cal2 = st.columns(2)
 
     _cal1.markdown("""
-    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2">
+    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2;height:100%">
       <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
-                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 1 — Quinta-feira, 30/04</div>
-      <div style="font-weight:700;color:#1e293b;margin-bottom:8px">Acesso antecipado + Reativação VIP</div>
-      <div style="font-size:0.82rem;color:#64748b;line-height:1.6">
-        <b>VIP + Fiéis:</b> "Antes de todo mundo — acesso exclusivo"<br>
-        Sem desconto. Tom de exclusividade e pertencimento.<br><br>
-        <b>Esfriando VIP:</b> "A gente sente sua falta ♥"<br>
-        Desconto real (10–15%) + frete grátis. Urgência de feriado.
+                  letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 1 — Quinta, 30/04</div>
+      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:10px">
+        Abertura de temporada — segmentos quentes
+      </div>
+      <div style="font-size:0.82rem;color:#64748b;line-height:1.7">
+        <b>VIP + Fiéis</b> → acesso antecipado, sem desconto<br>
+        <b>Esfriando VIP</b> → "sentimos sua falta" + desconto real<br>
       </div>
     </div>""", unsafe_allow_html=True)
 
     _cal2.markdown("""
-    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2">
+    <div style="border:2px solid #fda4af;border-radius:12px;padding:20px 22px;background:#fff1f2;height:100%">
       <div style="font-size:0.7rem;font-weight:700;color:#be185d;text-transform:uppercase;
                   letter-spacing:.06em;margin-bottom:6px">🗓 DISPARO 2 — Sábado, 09/05</div>
-      <div style="font-weight:700;color:#1e293b;margin-bottom:8px">Último dia — base ampla</div>
-      <div style="font-size:0.82rem;color:#64748b;line-height:1.6">
-        <b>Morno + Em Pausa:</b> "Você lembrou de mim, eu lembro de você"<br>
-        Desconto simbólico (10%) ou frete grátis. Feriado como gatilho externo.<br><br>
-        <b>Novo Crush:</b> Curadoria editorial — "Deixa a gente te ajudar a escolher"<br>
-        Sem desconto. Foco em 2ª compra.
+      <div style="font-weight:700;color:#1e293b;font-size:1rem;margin-bottom:10px">
+        Base completa — mensagem por perfil
+      </div>
+      <div style="font-size:0.82rem;color:#64748b;line-height:1.7">
+        <b>Novo Crush + Promissor</b> → curadoria, 2ª compra<br>
+        <b>Morno + Em Pausa + Ghosting</b> → reativação com feriado<br>
+        <b>Só Olhando</b> → convite de primeira compra<br>
       </div>
     </div>""", unsafe_allow_html=True)
 
@@ -339,49 +342,54 @@ with _aba_dia:
                                file_name=arquivo, mime="text/csv",
                                key=f"dm_{key}", disabled=(n == 0))
 
-    _vip_fieis_n  = int(_dqr["vip_n"] or 0) + int(_dqr["fieis_n"] or 0)
-    _vip_fieis_rs = float(_dqr["vip_rs"] or 0) + float(_dqr["fieis_rs"] or 0)
-
     st.markdown("**Disparo 1 — Quinta, 30/04**")
 
     _camp_card("vip_fieis", "Disparo 1", "VIP + Fiéis",
-        _vip_fieis_n, _vip_fieis_rs,
+        int(_dqr["vip_fieis_n"] or 0), float(_dqr["vip_fieis_rs"] or 0),
         "Sem desconto — acesso antecipado exclusivo",
-        "Exclusividade e pertencimento. Elas merecem ser as primeiras.",
+        "\"Você é especial aqui. Antes de todo mundo.\" Pertencimento, não promoção.",
         "status_code = 'S1' OR valor_code = 'V1'",
         f"{_hoje_brt}_dm_vip_fieis.csv")
 
     _camp_card("esf_vip", "Disparo 1", "Esfriando VIP",
         int(_dqr["esf_vip_n"] or 0), float(_dqr["esf_vip_rs"] or 0),
         "Desconto 10–15% + frete grátis",
-        "\"A gente sente sua falta\" — urgência real do feriado, tom caloroso.",
+        "\"A gente sente sua falta ♥\" — urgência genuína do feriado, tom caloroso e direto.",
         "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
         f"{_hoje_brt}_dm_esfriando_vip.csv")
 
     br()
     st.markdown("**Disparo 2 — Sábado, 09/05**")
 
-    _camp_card("morno_pausa", "Disparo 2", "Morno + Em Pausa",
-        int(_dqr["morno_n"] or 0) + int(_dqr["pausa_n"] or 0),
-        float(_dqr["morno_rs"] or 0) + float(_dqr["pausa_rs"] or 0),
-        "Desconto 10% ou frete grátis",
-        "\"Você lembrou de mim, eu lembro de você\" — feriado como desculpa legítima para voltar.",
-        "status_code IN ('S3','S7')",
-        f"{_hoje_brt}_dm_morno_pausa.csv")
-
-    _camp_card("novo_crush", "Disparo 2", "Novo Crush",
-        int(_dqr["novo_n"] or 0), float(_dqr["novo_rs"] or 0),
+    _camp_card("novo_promissor", "Disparo 2", "Novo Crush + Crush Promissor",
+        int(_dqr["novo_n"] or 0) + int(_dqr["promissor_n"] or 0),
+        float(_dqr["novo_rs"] or 0) + float(_dqr["promissor_rs"] or 0),
         "Sem desconto — curadoria editorial",
-        "\"Deixa a gente te ajudar a escolher\" — objetivo é 2ª compra, não margem.",
-        "status_code = 'S2'",
-        f"{_hoje_brt}_dm_novo_crush.csv")
+        "\"Você já nos escolheu uma vez. Deixa a gente te ajudar a escolher o presente perfeito.\" Foco em 2ª compra.",
+        "status_code = 'S2' OR (personalidade_code = 'P3' AND recencia_code IN ('R1','R2'))",
+        f"{_hoje_brt}_dm_novo_promissor.csv")
+
+    _camp_card("reativar", "Disparo 2", "Morno + Em Pausa + Ghosting",
+        int(_dqr["reativar_n"] or 0), float(_dqr["reativar_rs"] or 0),
+        "Desconto 10% ou frete grátis",
+        "\"Você lembrou de mim, eu lembro de você.\" O feriado é a desculpa perfeita para voltar.",
+        "status_code IN ('S3','S7','S6')",
+        f"{_hoje_brt}_dm_reativar.csv")
+
+    _camp_card("so_olhando", "Disparo 2", "Só Olhando — primeira compra",
+        int(_dqr["so_n"] or 0), 0,
+        "Oferta de entrada — desconto de boas-vindas ou frete grátis na 1ª compra",
+        "\"Que tal presentear com algo especial? Primeira compra com condição exclusiva.\" Convite de entrada.",
+        "status_code = 'S0'",
+        f"{_hoje_brt}_dm_so_olhando.csv")
 
     br()
-    st.markdown("""
+    st.markdown(f"""
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                 padding:14px 18px;font-size:0.82rem;color:#64748b;line-height:1.6">
-    🚫 <b>Não disparar para:</b> Ghosting antigo, Gelando baixo valor, Supressão —
-    preserva deliverability e economiza verba para quem tem chance real de converter.
+    ✅ <b>Base completa coberta: {_base_total:,} pessoas em 5 listas.</b><br>
+    O único filtro recomendado é técnico — aplique no seu ESP: remova hard bounces e
+    quem clicou em unsubscribe. Nenhuma exclusão estratégica necessária.
     </div>
     """, unsafe_allow_html=True)
 
