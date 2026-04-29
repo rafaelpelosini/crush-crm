@@ -221,7 +221,7 @@ st.markdown(f"""
 <hr style="margin:8px 0 20px;border:none;border-top:1px solid #e2e8f0">
 """, unsafe_allow_html=True)
 
-_aba_dia, _aba_higienicos, _aba_analitica = st.tabs(["☀️ Dia a dia", "🧹 Higiênicos", "📊 Analítica"])
+_aba_analitica, _aba_dia, _aba_higienicos = st.tabs(["📊 Analítica", "☀️ Dia a dia", "🧹 Higiênicos"])
 
 # ════════════════════════════════════════════════════════════════════════════
 # ABA DIA A DIA
