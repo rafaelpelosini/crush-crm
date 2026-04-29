@@ -174,6 +174,7 @@ df_status  = query(f"""
            ROUND(SUM(total_spent)::numeric, 0) receita
     FROM crm_profiles GROUP BY status_code, status_label ORDER BY status_code
 """)
+fieis = df_status[df_status.code == "S1"]["n"].sum() if not df_status.empty else 0
 
 df_pessoa  = query(f"""
     SELECT personalidade_code code, personalidade_label label, COUNT(*) n,
@@ -220,7 +221,7 @@ st.markdown(f"""
 <hr style="margin:8px 0 20px;border:none;border-top:1px solid #e2e8f0">
 """, unsafe_allow_html=True)
 
-_aba_dia, _aba_analitica = st.tabs(["☀️ Dia a dia", "📊 Analítica"])
+_aba_dia, _aba_higienicos, _aba_analitica = st.tabs(["☀️ Dia a dia", "🧹 Higiênicos", "📊 Analítica"])
 
 # ════════════════════════════════════════════════════════════════════════════
 # ABA DIA A DIA
@@ -470,6 +471,173 @@ with _aba_dia:
                 mime="text/csv",
                 key=f"acao_{_a['n']}",
             )
+
+# ════════════════════════════════════════════════════════════════════════════
+# ABA HIGIÊNICOS
+# ════════════════════════════════════════════════════════════════════════════
+
+with _aba_higienicos:
+
+    _hq = query("""
+        SELECT
+            COUNT(CASE WHEN status_code IN ('S1','S2') AND personalidade_code IN ('P1','P2') THEN 1 END) AS lookalike,
+            COUNT(CASE WHEN status_code IN ('S1','S2') AND recencia_code IN ('R1','R2') THEN 1 END) AS retargeting,
+            COUNT(CASE WHEN status_code = 'S2' THEN 1 END) AS novo_crush,
+            COUNT(CASE WHEN status_code = 'S3' THEN 1 END) AS morno,
+            COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS em_pausa,
+            COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2','V3') THEN 1 END) AS esfriando_vip,
+            COUNT(CASE WHEN status_code = 'S5' AND valor_code IN ('V1','V2') THEN 1 END) AS gelando_valor,
+            COUNT(CASE WHEN status_code = 'S6' THEN 1 END) AS ghosting,
+            COUNT(CASE WHEN status_code IN ('S5','S6') AND valor_code IN ('V4','V5') THEN 1 END) AS supressao
+        FROM crm_profiles
+    """)
+    _hr = _hq.iloc[0]
+
+    st.markdown("""
+    <div style="color:#64748b;font-size:0.88rem;margin-bottom:24px;line-height:1.6">
+    Tarefas recorrentes que mantêm a base funcionando entre lançamentos.<br>
+    <strong>Cadência base: antes de cada lançamento (~14–20 dias) ou quando o segmento mudar.</strong>
+    </div>
+    """, unsafe_allow_html=True)
+
+    def _hig_secao(titulo, cor, desc):
+        st.markdown(f"""
+        <div style="background:{cor}18;border-left:4px solid {cor};border-radius:8px;
+                    padding:12px 18px;margin:24px 0 12px">
+          <div style="font-weight:700;color:{cor};font-size:0.95rem">{titulo}</div>
+          <div style="font-size:0.8rem;color:#64748b;margin-top:2px">{desc}</div>
+        </div>""", unsafe_allow_html=True)
+
+    def _hig_card(key, titulo, canais, n, desc, filtro, arquivo):
+        badges = " ".join([
+            f'<span style="background:#f1f5f9;border-radius:20px;padding:2px 10px;'
+            f'font-size:0.72rem;font-weight:600;color:#475569">{c}</span>'
+            for c in canais
+        ])
+        col_l, col_r = st.columns([5, 1])
+        with col_l:
+            st.markdown(f"""
+            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+                <span style="font-weight:600;color:#1e293b">{titulo}</span>
+                {badges}
+                <span style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:20px;
+                             padding:2px 12px;font-size:0.78rem;font-weight:700;color:#7c3aed;margin-left:auto">
+                  {n:,} clientes
+                </span>
+              </div>
+              <div style="font-size:0.82rem;color:#64748b;line-height:1.55">{desc}</div>
+            </div>""", unsafe_allow_html=True)
+        with col_r:
+            br()
+            st.download_button("⬇️ CSV", csv_bytes(filtro),
+                               file_name=arquivo, mime="text/csv",
+                               key=f"hig_{key}", disabled=(n == 0))
+
+    _hoje_hig = now_brt().strftime("%Y-%m-%d")
+
+    # ── Seção 1: A cada lançamento ────────────────────────────────────────────
+    _hig_secao("📣 A cada lançamento",
+               "#7c3aed",
+               "Suba no Meta Ads antes de qualquer disparo. Mantém audiências sempre frescas e o CPM baixo.")
+
+    _hig_card("lookalike",
+        "Lookalike Seed",
+        ["Meta Ads"],
+        int(_hr["lookalike"]),
+        "Suas melhores clientes — fiéis ou novas com personalidade Sugar Lover / Lover. "
+        "Use como semente para Lookalike no Meta. Audiências de qualidade aqui reduzem custo de aquisição.",
+        "status_code IN ('S1','S2') AND personalidade_code IN ('P1','P2')",
+        f"{_hoje_hig}_lookalike_seed.csv")
+
+    _hig_card("retargeting",
+        "Retargeting Quente",
+        ["Meta Ads"],
+        int(_hr["retargeting"]),
+        "Clientes ativas e recentes (compraram nos últimos ~3 meses). "
+        "Perfeitas para retargeting no lançamento — já conhecem a marca e a chance de conversão é muito maior.",
+        "status_code IN ('S1','S2') AND recencia_code IN ('R1','R2')",
+        f"{_hoje_hig}_retargeting_quente.csv")
+
+    # ── Seção 2: Nutrir ───────────────────────────────────────────────────────
+    _hig_secao("✉️ Nutrir",
+               "#0ea5e9",
+               "Engaje antes que esfriem. Em moda, a janela de reconversão fecha mais rápido do que parece.")
+
+    _hig_card("novo_crush",
+        "Novo Crush → 2ª Compra",
+        ["Email", "WhatsApp"],
+        int(_hr["novo_crush"]),
+        "Compraram pela 1ª vez recentemente. A 2ª compra é o passo mais crítico: "
+        "quem compra 2 vezes tem chance muito maior de virar fiel. "
+        "Um email de boas-vindas + oferta leve ou novidade do próximo lançamento funciona bem.",
+        "status_code = 'S2'",
+        f"{_hoje_hig}_novo_crush.csv")
+
+    _hig_card("morno",
+        "Morno — Janela Fechando",
+        ["Email"],
+        int(_hr["morno"]),
+        "1 compra, faz 3–6 meses. Ainda lembram da marca mas estão esfriando. "
+        "Uma novidade de lançamento ou oferta com urgência pode reconverter antes que virem ghosting.",
+        "status_code = 'S3'",
+        f"{_hoje_hig}_morno.csv")
+
+    _hig_card("em_pausa",
+        "Em Pausa",
+        ["Email", "WhatsApp"],
+        int(_hr["em_pausa"]),
+        "2+ compras mas pararam faz 3–9 meses. Elas gostam da marca — só precisam de um motivo pra voltar. "
+        "Early access de lançamento ou desconto exclusivo costuma funcionar.",
+        "status_code = 'S7'",
+        f"{_hoje_hig}_em_pausa.csv")
+
+    # ── Seção 3: Reativar ─────────────────────────────────────────────────────
+    _hig_secao("🔥 Reativar — Urgente",
+               "#ef4444",
+               "Clientes de valor sumindo. Cada lançamento sem ação aumenta o custo de recuperação.")
+
+    _hig_card("esfriando_vip",
+        "Esfriando VIP",
+        ["Meta Ads", "Email"],
+        int(_hr["esfriando_vip"]),
+        "Alto valor e sumindo há 6–9 meses. Prioridade máxima. "
+        "Suba no Meta como audiência personalizada e mande campanha de reativação segmentada. "
+        "Recuperar 1 VIP vale mais que converter 10 novas clientes.",
+        "status_code = 'S4' AND valor_code IN ('V1','V2','V3')",
+        f"{_hoje_hig}_esfriando_vip.csv")
+
+    _hig_card("gelando_valor",
+        "Gelando com Valor",
+        ["Email"],
+        int(_hr["gelando_valor"]),
+        "9–12 meses sem comprar, mas deixaram valor real na loja. Última janela antes de perder "
+        "definitivamente. Oferta de win-back com urgência real (tempo ou quantidade limitada) pode funcionar.",
+        "status_code = 'S5' AND valor_code IN ('V1','V2')",
+        f"{_hoje_hig}_gelando_valor.csv")
+
+    _hig_card("ghosting",
+        "Ghosting",
+        ["Email"],
+        int(_hr["ghosting"]),
+        "Compraram 1 vez e desapareceram. Em moda é relativamente comum, mas vale uma campanha de "
+        "reativação em massa (tom leve, sem forçar). Quem não abrir 2–3 emails vai direto pra supressão.",
+        "status_code = 'S6'",
+        f"{_hoje_hig}_ghosting.csv")
+
+    # ── Seção 4: Não tocar ────────────────────────────────────────────────────
+    _hig_secao("🚫 Não Tocar — Supressão",
+               "#94a3b8",
+               "Exclua dessas audiências no Meta e remova das listas de email. Não gaste verba aqui.")
+
+    _hig_card("supressao",
+        "Supressão Completa",
+        ["Meta Ads", "Email"],
+        int(_hr["supressao"]),
+        "Gelando ou ghostando com baixo valor histórico. Sem perspectiva de retorno no curto prazo. "
+        "Excluir dessas campanhas reduz CPM e melhora o score de qualidade das audiências no Meta.",
+        "status_code IN ('S5','S6') AND valor_code IN ('V4','V5')",
+        f"{_hoje_hig}_supressao.csv")
 
 # ════════════════════════════════════════════════════════════════════════════
 # ABA ANALÍTICA
