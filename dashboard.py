@@ -232,58 +232,55 @@ with _aba_dia:
     _hoje_brt = now_brt().date()
     _ontem    = _hoje_brt - timedelta(days=1)
 
-    _brief = query(f"""
-        WITH vendas AS (
-            SELECT
-                ROUND(SUM(CASE WHEN date_created::date = '{_ontem}' THEN total ELSE 0 END)::numeric,0) vendas_ontem,
-                COUNT(CASE WHEN date_created::date = '{_ontem}' THEN 1 END) pedidos_ontem,
-                ROUND(AVG(CASE WHEN date_created::date >= CURRENT_DATE - 31
-                               AND date_created::date < CURRENT_DATE - 1 THEN total END)::numeric,0) ticket_medio_30d,
-                ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) vendas_7d,
-                ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 14
-                               AND date_created::date < CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) vendas_7d_ant
-            FROM orders
-            WHERE status NOT IN ('cancelled','refunded','failed')
-        ),
-        cadastros AS (
-            SELECT
-                COUNT(CASE WHEN registration_date::date = '{_ontem}' THEN 1 END) novos_ontem,
-                COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 2 THEN 1 END) novos_anteontem,
-                ROUND(AVG(cnt)::numeric,1) media_30d
-            FROM (
-                SELECT registration_date::date d, COUNT(*) cnt
-                FROM customers
-                WHERE registration_date::date >= CURRENT_DATE - 31
-                GROUP BY d
-            ) sub
-        ),
-        alertas AS (
-            SELECT
-                COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2') THEN 1 END) esfriando_vip,
-                COUNT(CASE WHEN status_code = 'S4' THEN 1 END) esfriando_total,
-                COUNT(CASE WHEN status_code = 'S2' AND frequencia_code = 'F1'
-                           AND last_order_date >= CURRENT_DATE - 30 THEN 1 END) aguardando_2a,
-                COUNT(CASE WHEN status_code = 'S7' THEN 1 END) em_pausa,
-                ROUND(100.0 * COUNT(CASE WHEN status_code = 'S6' THEN 1 END) / NULLIF(COUNT(*),0), 1) ghosting_pct
-            FROM crm_profiles
-        )
-        SELECT v.*, c.*, a.*
-        FROM vendas v, cadastros c, alertas a
+    _brief = query("""
+        SELECT
+            ROUND(SUM(CASE WHEN date_created::date = CURRENT_DATE - 1 THEN total ELSE 0 END)::numeric,0) AS vendas_ontem,
+            COUNT(CASE WHEN date_created::date = CURRENT_DATE - 1 THEN 1 END) AS pedidos_ontem,
+            ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) AS vendas_7d,
+            ROUND(SUM(CASE WHEN date_created::date >= CURRENT_DATE - 14
+                           AND date_created::date < CURRENT_DATE - 7 THEN total ELSE 0 END)::numeric,0) AS vendas_7d_ant
+        FROM orders
+        WHERE status NOT IN ('cancelled','refunded','failed')
     """)
-    _b = _brief.iloc[0]
+    _bc = query("""
+        SELECT
+            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 1 THEN 1 END) AS novos_ontem,
+            COUNT(CASE WHEN registration_date::date = CURRENT_DATE - 2 THEN 1 END) AS novos_anteontem,
+            ROUND(AVG(cnt)::numeric,1) AS media_30d
+        FROM (
+            SELECT registration_date::date d, COUNT(*) cnt
+            FROM customers
+            WHERE registration_date IS NOT NULL AND registration_date != ''
+              AND registration_date::date >= CURRENT_DATE - 31
+            GROUP BY d
+        ) sub
+    """)
+    _ba = query("""
+        SELECT
+            COUNT(CASE WHEN status_code = 'S4' AND valor_code IN ('V1','V2') THEN 1 END) AS esfriando_vip,
+            COUNT(CASE WHEN status_code = 'S4' THEN 1 END) AS esfriando_total,
+            COUNT(CASE WHEN status_code = 'S2' AND frequencia_code = 'F1'
+                       AND last_order_date >= CURRENT_DATE - 30 THEN 1 END) AS aguardando_2a,
+            COUNT(CASE WHEN status_code = 'S7' THEN 1 END) AS em_pausa,
+            ROUND(100.0 * COUNT(CASE WHEN status_code = 'S6' THEN 1 END) / NULLIF(COUNT(*),0), 1) AS ghosting_pct
+        FROM crm_profiles
+    """)
+    _b   = _brief.iloc[0]
+    _bcc = _bc.iloc[0]
+    _baa = _ba.iloc[0]
 
     _vendas_ontem  = float(_b["vendas_ontem"] or 0)
     _pedidos_ontem = int(_b["pedidos_ontem"] or 0)
     _vendas_7d     = float(_b["vendas_7d"] or 0)
     _vendas_7d_ant = float(_b["vendas_7d_ant"] or 0)
-    _novos_ontem   = int(_b["novos_ontem"] or 0)
-    _novos_anteontem = int(_b["novos_anteontem"] or 0)
-    _media_30d     = float(_b["media_30d"] or 0)
-    _esfriando_vip = int(_b["esfriando_vip"] or 0)
-    _esfriando_total = int(_b["esfriando_total"] or 0)
-    _aguardando_2a = int(_b["aguardando_2a"] or 0)
-    _em_pausa      = int(_b["em_pausa"] or 0)
-    _ghosting_pct  = float(_b["ghosting_pct"] or 0)
+    _novos_ontem   = int(_bcc["novos_ontem"] or 0)
+    _novos_anteontem = int(_bcc["novos_anteontem"] or 0)
+    _media_30d     = float(_bcc["media_30d"] or 0)
+    _esfriando_vip = int(_baa["esfriando_vip"] or 0)
+    _esfriando_total = int(_baa["esfriando_total"] or 0)
+    _aguardando_2a = int(_baa["aguardando_2a"] or 0)
+    _em_pausa      = int(_baa["em_pausa"] or 0)
+    _ghosting_pct  = float(_baa["ghosting_pct"] or 0)
     _delta_7d      = _vendas_7d - _vendas_7d_ant
 
     # ── Saudação ─────────────────────────────────────────────────────────────
